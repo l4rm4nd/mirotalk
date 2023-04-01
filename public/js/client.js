@@ -75,6 +75,8 @@ const chatInputEmoji = {
 const className = {
     user: 'fas fa-user',
     clock: 'fas fa-clock',
+    hideMeOn: 'fas fa-user-slash',
+    hideMeOff: 'fas fa-user',
     audioOn: 'fas fa-microphone',
     audioOff: 'fas fa-microphone-slash',
     videoOn: 'fas fa-video',
@@ -85,6 +87,8 @@ const className = {
     privacy: 'far fa-circle',
     snapShot: 'fas fa-camera-retro',
     pinUnpin: 'fas fa-map-pin',
+    zoomIn: 'fas fa-magnifying-glass-plus',
+    zoomOut: 'fas fa-magnifying-glass-minus',
     fullScreen: 'fas fa-expand',
     fsOn: 'fas fa-compress-alt',
     fsOff: 'fas fa-expand-alt',
@@ -105,10 +109,14 @@ const className = {
 
 const myRoomUrl = window.location.href;
 
+// Local Storage class
+const lS = new LocalStorage();
+
 // Show desired buttons captionBtn, showSwapCameraBtn, showScreenShareBtn, showFullScreenBtn -> (auto-detected)
 const buttons = {
     main: {
         showShareRoomBtn: true,
+        showHideMeBtn: true,
         showAudioBtn: true,
         showVideoBtn: true,
         showScreenBtn: true,
@@ -146,10 +154,12 @@ const buttons = {
         showFileShareBtn: true,
         showShareVideoAudioBtn: true,
         showPrivateMessageBtn: true,
+        showZoomInOutBtn: true,
     },
     local: {
         showSnapShotBtn: true,
         showVideoCircleBtn: true,
+        showZoomInOutBtn: true,
     },
 };
 
@@ -162,6 +172,8 @@ const userLimitsActive = false; // Limit users per room
 const usersCountLimit = 2; // Limit 2 users per room if userLimitsActive true
 
 const useAvatarApi = true; // if false the cam-Off avatar = avatarImg
+
+let isHideMeActive = false; // Hide myself from the meeting view
 
 let notifyBySound = true; // turn on - off sound notifications
 
@@ -228,6 +240,9 @@ let pitchDetectionStatus = false;
 let audioContext;
 let mediaStreamSource;
 let meter;
+let isPushToTalkActive = false;
+let isAudioPitchBar = true;
+let isSpaceDown = false;
 let isScreenStreaming = false;
 let showChatOnMessage = true;
 let isChatRoomVisible = false;
@@ -274,6 +289,7 @@ let initSpeakerSelect;
 // buttons bar
 let buttonsBar;
 let shareRoomBtn;
+let hideMeBtn;
 let audioBtn;
 let videoBtn;
 let swapCameraBtn;
@@ -332,6 +348,8 @@ let mySettingsCloseBtn;
 let myPeerNameSet;
 let myPeerNameSetBtn;
 let switchSounds;
+let switchPushToTalk;
+let switchAudioPitchBar;
 let audioInputSelect;
 let audioOutputSelect;
 let videoSelect;
@@ -429,9 +447,6 @@ let speechRecognitionIcon;
 let speechRecognitionStart;
 let speechRecognitionStop;
 
-// Local Storage class
-let lS = new LocalStorage();
-
 /**
  * Load all Html elements by Id
  */
@@ -451,6 +466,7 @@ function getHtmlElementsById() {
     // buttons Bar
     buttonsBar = getId('buttonsBar');
     shareRoomBtn = getId('shareRoomBtn');
+    hideMeBtn = getId('hideMeBtn');
     audioBtn = getId('audioBtn');
     videoBtn = getId('videoBtn');
     swapCameraBtn = getId('swapCameraBtn');
@@ -509,6 +525,8 @@ function getHtmlElementsById() {
     myPeerNameSet = getId('myPeerNameSet');
     myPeerNameSetBtn = getId('myPeerNameSetBtn');
     switchSounds = getId('switchSounds');
+    switchPushToTalk = getId('switchPushToTalk');
+    switchAudioPitchBar = getId('switchAudioPitchBar');
     audioInputSelect = getId('audioSource');
     audioOutputSelect = getId('audioOutput');
     videoSelect = getId('videoSource');
@@ -589,6 +607,7 @@ function setButtonsToolTip() {
     setTippy(initScreenShareBtn, 'Toggle screen sharing', 'top');
     // main buttons
     setTippy(shareRoomBtn, 'Invite others to join', 'right-start');
+    setTippy(hideMeBtn, 'Toggle hide myself from the room view', 'right-start');
     setTippy(audioBtn, 'Stop the audio', 'right-start');
     setTippy(videoBtn, 'Stop the video', 'right-start');
     setTippy(screenShareBtn, 'Start screen sharing', 'right-start');
@@ -625,6 +644,12 @@ function setButtonsToolTip() {
     // settings
     setTippy(mySettingsCloseBtn, 'Close', 'right');
     setTippy(myPeerNameSetBtn, 'Change name', 'top');
+    setTippy(
+        switchPushToTalk,
+        'If Active, When SpaceBar keydown the microphone will be activated, on keyup will be deactivated, like a walkie-talkie.',
+        'right',
+    );
+    setTippy(switchSounds, 'Toggle room notify sounds', 'right');
     // tab btns
     setTippy(tabDevicesBtn, 'Devices', 'top');
     setTippy(tabBandwidthBtn, 'Bandwidth', 'top');
@@ -737,6 +762,7 @@ function getRoomId() {
         const newUrl = signalingServer + '/join/' + roomId;
         window.history.pushState({ url: newUrl }, roomId, newUrl);
     }
+    console.log('Direct join', { room: roomId });
     return roomId;
 }
 
@@ -777,8 +803,10 @@ function getPeerName() {
     const qs = new URLSearchParams(window.location.search);
     const name = filterXSS(qs.get('name'));
     if (isHtml(name)) {
+        console.log('Direct join', { name: 'Invalid name' });
         return 'Invalid name';
     }
+    console.log('Direct join', { name: name });
     return name;
 }
 
@@ -792,8 +820,10 @@ function getScreenEnabled() {
     if (screen) {
         screen = screen.toLowerCase();
         let queryPeerScreen = screen === '1' || screen === 'true';
+        console.log('Direct join', { screen: queryPeerScreen });
         return queryPeerScreen;
     }
+    console.log('Direct join', { screen: false });
     return false;
 }
 
@@ -904,7 +934,9 @@ async function handleConnect() {
         await joinToChannel();
     } else {
         await initEnumerateDevices();
+        await getPeerGeoLocation();
         await setupLocalMedia();
+        await whoAreYou();
     }
 }
 
@@ -1003,6 +1035,7 @@ function handleRules(isPresenter) {
 function handleButtonsRule() {
     // Main
     elemDisplay(shareRoomBtn, buttons.main.showShareRoomBtn);
+    elemDisplay(hideMeBtn, buttons.main.showHideMeBtn);
     elemDisplay(audioBtn, buttons.main.showAudioBtn);
     elemDisplay(videoBtn, buttons.main.showVideoBtn);
     //elemDisplay(screenShareBtn, buttons.main.showScreenBtn); // auto-detected
@@ -1091,18 +1124,18 @@ async function whoAreYou() {
 
     // select video - audio
 
-    initVideoSelect.onchange = () => {
+    initVideoSelect.onchange = async () => {
         videoSelect.selectedIndex = initVideoSelect.selectedIndex;
         lS.setLocalStorageDevices(lS.MEDIA_TYPE.video, videoSelect.selectedIndex, videoSelect.value);
         myVideoChange = true;
-        refreshLocalMedia();
-        changeCamera(initVideoSelect.value);
+        await refreshLocalMedia();
+        await changeInitCamera(initVideoSelect.value);
     };
-    initMicrophoneSelect.onchange = () => {
+    initMicrophoneSelect.onchange = async () => {
         audioInputSelect.selectedIndex = initMicrophoneSelect.selectedIndex;
         lS.setLocalStorageDevices(lS.MEDIA_TYPE.audio, audioInputSelect.selectedIndex, audioInputSelect.value);
         myVideoChange = false;
-        refreshLocalMedia();
+        await refreshLocalMedia();
     };
     initSpeakerSelect.onchange = () => {
         audioOutputSelect.selectedIndex = initSpeakerSelect.selectedIndex;
@@ -1176,8 +1209,8 @@ async function loadLocalStorage() {
     // Start init cam
     if (useVideo && initVideoSelect.value) {
         myVideoChange = true;
-        refreshLocalMedia();
-        changeCamera(initVideoSelect.value);
+        await refreshLocalMedia();
+        await changeInitCamera(initVideoSelect.value);
     }
 }
 
@@ -1185,21 +1218,25 @@ async function loadLocalStorage() {
  * Change init camera by device id
  * @param {string} deviceId
  */
-function changeCamera(deviceId) {
+async function changeInitCamera(deviceId) {
     if (initStream) {
         stopTracks(initStream);
         initVideo.style.display = 'block';
     }
+    // Get video constraints
+    let videoConstraints = await getVideoConstraints('default');
+    videoConstraints['deviceId'] = { exact: deviceId };
+
     navigator.mediaDevices
-        .getUserMedia({ video: { deviceId: deviceId } })
+        .getUserMedia({ video: videoConstraints })
         .then((camStream) => {
             initVideo.srcObject = camStream;
             initStream = camStream;
-            console.log('Success attached init video stream');
+            console.log('Success attached init video stream', initStream.getVideoTracks()[0].getSettings());
         })
         .catch((err) => {
-            console.error('[Error] changeCamera', err);
-            userLog('error', 'Error while swapping camera' + err, 'top-end');
+            console.error('[Error] changeInitCamera', err);
+            userLog('error', 'Error while swapping init camera' + err, 'top-end');
         });
 }
 
@@ -1215,11 +1252,13 @@ function checkPeerAudioVideo() {
         audio = audio.toLowerCase();
         let queryPeerAudio = audio === '1' || audio === 'true';
         if (queryPeerAudio != null) handleAudio(audioBtn, false, queryPeerAudio);
+        console.log('Direct join', { audio: queryPeerAudio });
     }
     if (video) {
         video = video.toLowerCase();
         let queryPeerVideo = video === '1' || video === 'true';
         if (queryPeerVideo != null) handleVideo(videoBtn, false, queryPeerVideo);
+        console.log('Direct join', { video: queryPeerVideo });
     }
 }
 
@@ -1227,7 +1266,7 @@ function checkPeerAudioVideo() {
  * Room and Peer name are ok Join Channel
  */
 async function whoAreYouJoin() {
-    if (isMobileDevice && myVideoStatus && myAudioStatus) refreshLocalMedia();
+    if (isMobileDevice && myVideoStatus && myAudioStatus) await refreshLocalMedia();
     myVideoWrap.style.display = 'inline';
     myVideoParagraph.innerHTML = myPeerName + ' (me)';
     setPeerAvatarImgName('myVideoAvatarImage', myPeerName, useAvatarApi);
@@ -1867,35 +1906,23 @@ async function setupLocalMedia() {
         return;
     }
 
-    await getPeerGeoLocation();
-
     console.log('08. Requesting access to local audio - video inputs');
     console.log('09. Supported constraints', navigator.mediaDevices.getSupportedConstraints());
 
     // default | qvgaVideo | vgaVideo | hdVideo | fhdVideo | 2kVideo | 4kVideo |
-    let videoConstraints = useVideo ? getVideoConstraints('default') : false;
-    let audioConstraints = useAudio;
-    if (useAudio) {
-        audioConstraints = {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 44100,
-        };
-    }
-
-    const constraints = {
-        audio: audioConstraints,
-        video: videoConstraints,
-    };
-
-    let stream = null;
+    const videoConstraints = useVideo ? await getVideoConstraints('default') : false;
+    const audioConstraints = useAudio ? await getAudioConstraints() : false;
 
     try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: audioConstraints,
+            video: videoConstraints,
+        });
         if (stream) {
             await loadLocalMedia(stream);
-            await startPitchDetection(stream);
-            await whoAreYou();
+            if (useAudio) {
+                await startPitchDetection(stream);
+            }
         }
     } catch (err) {
         console.error('[Error] - Access denied for audio - video device', err);
@@ -1932,6 +1959,8 @@ async function loadLocalMedia(stream) {
     const myAudioStatusIcon = document.createElement('button');
     const myVideoFullScreenBtn = document.createElement('button');
     const myVideoPinBtn = document.createElement('button');
+    const myVideoZoomInBtn = document.createElement('button');
+    const myVideoZoomOutBtn = document.createElement('button');
     const myVideoAvatarImage = document.createElement('img');
     const myPitchMeter = document.createElement('div');
     const myPitchBar = document.createElement('div');
@@ -1968,6 +1997,12 @@ async function loadLocalMedia(stream) {
     myVideoFullScreenBtn.setAttribute('id', 'myVideoFullScreenBtn');
     myVideoFullScreenBtn.className = className.fullScreen;
 
+    // my video zoomIn/Out
+    myVideoZoomInBtn.setAttribute('id', 'myVideoZoomInBtn');
+    myVideoZoomInBtn.className = className.zoomIn;
+    myVideoZoomOutBtn.setAttribute('id', 'myVideoZoomOutBtn');
+    myVideoZoomOutBtn.className = className.zoomOut;
+
     // my video pin/unpin button
     myVideoPinBtn.setAttribute('id', 'myVideoPinBtn');
     myVideoPinBtn.className = className.pinUnpin;
@@ -1981,11 +2016,13 @@ async function loadLocalMedia(stream) {
     setTippy(myAudioStatusIcon, 'My audio is on', 'bottom');
     setTippy(myVideoToImgBtn, 'Take a snapshot', 'bottom');
     setTippy(myVideoFullScreenBtn, 'Full screen mode', 'bottom');
+    setTippy(myVideoZoomInBtn, 'Zoom in video', 'bottom');
+    setTippy(myVideoZoomOutBtn, 'Zoom out video', 'bottom');
     setTippy(myVideoPinBtn, 'Toggle Pin video', 'bottom');
 
     // my video avatar image
     myVideoAvatarImage.setAttribute('id', 'myVideoAvatarImage');
-    myVideoAvatarImage.className = 'videoAvatarImage pulsate';
+    myVideoAvatarImage.className = 'videoAvatarImage'; // pulsate
 
     // my pitch meter
     myPitchMeter.setAttribute('id', 'myPitch');
@@ -2003,6 +2040,12 @@ async function loadLocalMedia(stream) {
     if (!isMobileDevice) {
         myVideoNavBar.appendChild(myVideoPinBtn);
     }
+
+    if (buttons.local.showZoomInOutBtn) {
+        myVideoNavBar.appendChild(myVideoZoomInBtn);
+        myVideoNavBar.appendChild(myVideoZoomOutBtn);
+    }
+
     if (isVideoFullScreenSupported) {
         myVideoNavBar.appendChild(myVideoFullScreenBtn);
     }
@@ -2070,6 +2113,10 @@ async function loadLocalMedia(stream) {
     }
 
     handleVideoPinUnpin(myLocalMedia.id, myVideoPinBtn.id, myVideoWrap.id, myLocalMedia.id);
+
+    if (buttons.local.showZoomInOutBtn) {
+        handleVideoZoomInOut(myVideoZoomInBtn.id, myVideoZoomOutBtn.id, myLocalMedia.id);
+    }
 
     refreshMyVideoAudioStatus(localMediaStream);
 
@@ -2148,6 +2195,8 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
     const remoteVideoToImgBtn = document.createElement('button');
     const remoteVideoFullScreenBtn = document.createElement('button');
     const remoteVideoPinBtn = document.createElement('button');
+    const remoteVideoZoomInBtn = document.createElement('button');
+    const remoteVideoZoomOutBtn = document.createElement('button');
     const remoteVideoAvatarImage = document.createElement('img');
     const remotePitchMeter = document.createElement('div');
     const remotePitchBar = document.createElement('div');
@@ -2200,6 +2249,12 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
     remotePeerKickOut.setAttribute('id', peer_id + '_kickOut');
     remotePeerKickOut.className = className.kickOut;
 
+    // remote video zoomIn/Out
+    remoteVideoZoomInBtn.setAttribute('id', peer_id + 'videoZoomIn');
+    remoteVideoZoomInBtn.className = className.zoomIn;
+    remoteVideoZoomOutBtn.setAttribute('id', peer_id + 'videoZoomOut');
+    remoteVideoZoomOutBtn.className = className.zoomOut;
+
     // remote video full screen mode
     remoteVideoFullScreenBtn.setAttribute('id', peer_id + '_fullScreen');
     remoteVideoFullScreenBtn.className = className.fullScreen;
@@ -2220,11 +2275,13 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
     setTippy(remoteVideoToImgBtn, 'Take a snapshot', 'bottom');
     setTippy(remotePeerKickOut, 'Kick out', 'bottom');
     setTippy(remoteVideoFullScreenBtn, 'Full screen mode', 'bottom');
+    setTippy(remoteVideoZoomInBtn, 'Zoom in video', 'bottom');
+    setTippy(remoteVideoZoomOutBtn, 'Zoom out video', 'bottom');
     setTippy(remoteVideoPinBtn, 'Toggle Pin video', 'bottom');
 
     // my video avatar image
     remoteVideoAvatarImage.setAttribute('id', peer_id + '_avatar');
-    remoteVideoAvatarImage.className = 'videoAvatarImage pulsate';
+    remoteVideoAvatarImage.className = 'videoAvatarImage'; // pulsate
 
     // remote pitch meter
     remotePitchMeter.setAttribute('id', peer_id + '_pitch');
@@ -2242,6 +2299,12 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
     if (!isMobileDevice) {
         remoteVideoNavBar.appendChild(remoteVideoPinBtn);
     }
+
+    if (buttons.remote.showZoomInOutBtn) {
+        remoteVideoNavBar.appendChild(remoteVideoZoomInBtn);
+        remoteVideoNavBar.appendChild(remoteVideoZoomOutBtn);
+    }
+
     if (isVideoFullScreenSupported) {
         remoteVideoNavBar.appendChild(remoteVideoFullScreenBtn);
     }
@@ -2249,8 +2312,10 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
         remoteVideoNavBar.appendChild(remoteVideoToImgBtn);
     }
 
-    remoteVideoNavBar.appendChild(remoteVideoStatusIcon);
-    remoteVideoNavBar.appendChild(remoteAudioStatusIcon);
+    if (buttons.remote.showZoomInOutBtn) {
+        remoteVideoNavBar.appendChild(remoteVideoStatusIcon);
+        remoteVideoNavBar.appendChild(remoteAudioStatusIcon);
+    }
 
     if (buttons.remote.showAudioVolume) {
         remoteVideoNavBar.appendChild(remoteAudioVolume);
@@ -2305,6 +2370,11 @@ async function loadRemoteMediaStream(stream, peers, peer_id) {
 
     // handle video pin/unpin
     handleVideoPinUnpin(remoteMedia.id, remoteVideoPinBtn.id, remoteVideoWrap.id, peer_id, peer_screen_status);
+
+    if (buttons.remote.showZoomInOutBtn) {
+        // handle video zoomIn/Out
+        handleVideoZoomInOut(remoteVideoZoomInBtn.id, remoteVideoZoomOutBtn.id, remoteMedia.id, peer_id);
+    }
 
     // pin video on screen share detected
     if (peer_video_status && peer_screen_status) {
@@ -2708,6 +2778,7 @@ function handleVideoPinUnpin(elemId, pnId, camId, peerId, isScreen = false) {
     let videoPinMediaContainer = getId('videoPinMediaContainer');
     if (btnPn && videoPlayer && cam) {
         btnPn.addEventListener('click', () => {
+            if (isMobileDevice) return;
             playSound('click');
             isVideoPinned = !isVideoPinned;
             if (isVideoPinned) {
@@ -2725,6 +2796,7 @@ function handleVideoPinUnpin(elemId, pnId, camId, peerId, isScreen = false) {
             } else {
                 if (pinnedVideoPlayerId != videoPlayer.id) {
                     isVideoPinned = true;
+                    if (isScreenEnabled) return;
                     return userLog('toast', 'Another video seems pinned, unpin it before to pin this one', 5000);
                 }
                 if (!isScreenStreaming) videoPlayer.style.objectFit = 'var(--video-object-fit)';
@@ -2776,6 +2848,57 @@ function toggleVideoPin(position) {
             break;
     }
     resizeVideoMedia();
+}
+
+/**
+ * Zoom in/out video element
+ * @param {string} zoomInBtnId
+ * @param {string} zoomOutBtnId
+ * @param {string} mediaId
+ * @param {string} peerId
+ */
+function handleVideoZoomInOut(zoomInBtnId, zoomOutBtnId, mediaId, peerId = null) {
+    const id = peerId ? peerId + '_videoStatus' : 'myVideoStatusIcon';
+    const zoomIn = getId(zoomInBtnId);
+    const zoomOut = getId(zoomOutBtnId);
+    const video = getId(mediaId);
+
+    let zoom = 1;
+
+    function setTransform() {
+        if (isVideoOf(id) || isVideoPrivacyMode(video)) return;
+        if (zoom < 1) zoom = 1;
+        video.style.scale = zoom;
+    }
+
+    video.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        let delta = e.wheelDelta ? e.wheelDelta : -e.deltaY;
+        delta > 0 ? (zoom *= 1.2) : (zoom /= 1.2);
+        setTransform();
+    });
+
+    zoomIn.addEventListener('click', () => {
+        if (isVideoOf(id)) return userLog('toast', 'Zoom in work when video is on');
+        if (isVideoPrivacyMode(video)) return userLog('toast', 'Zoom in not allowed if video on privacy mode');
+        zoom = zoom + 0.1;
+        setTransform();
+    });
+
+    zoomOut.addEventListener('click', () => {
+        if (isVideoOf(id)) return userLog('toast', 'Zoom out work when video is on');
+        if (isVideoPrivacyMode(video)) return userLog('toast', 'Zoom out not allowed if video on privacy mode');
+        zoom = zoom - 0.1;
+        setTransform();
+    });
+
+    function isVideoOf(id) {
+        const videoStatusBtn = getId(id);
+        return videoStatusBtn.className === className.videoOff;
+    }
+    function isVideoPrivacyMode() {
+        return video.classList.contains('videoCircle');
+    }
 }
 
 /**
@@ -2882,7 +3005,7 @@ function getTimeToString(time) {
 
 /**
  * Refresh my localMediaStream audio/video status
- * @param object} localMediaStream
+ * @param {object} localMediaStream
  */
 function refreshMyVideoAudioStatus(localMediaStream) {
     // check Track audio/video status
@@ -2903,6 +3026,7 @@ function refreshMyVideoAudioStatus(localMediaStream) {
  */
 function manageLeftButtons() {
     setShareRoomBtn();
+    setHideMeButton();
     setAudioBtn();
     setVideoBtn();
     setSwapCameraBtn();
@@ -2930,12 +3054,41 @@ function setShareRoomBtn() {
 }
 
 /**
+ * Hide myself from room view
+ */
+function setHideMeButton() {
+    hideMeBtn.addEventListener('click', (e) => {
+        isHideMeActive = !isHideMeActive;
+        handleHideMe(isHideMeActive);
+    });
+}
+
+/**
  * Audio mute - unmute button click event
  */
 function setAudioBtn() {
     audioBtn.addEventListener('click', (e) => {
         handleAudio(e, false);
     });
+
+    document.onkeydown = (e) => {
+        if (!isPushToTalkActive || isChatRoomVisible) return;
+        if (e.code === 'Space') {
+            if (isSpaceDown) return; // prevent multiple call
+            handleAudio(audioBtn, false, true);
+            isSpaceDown = true;
+            console.log('Push-to-talk: audio ON');
+        }
+    };
+    document.onkeyup = (e) => {
+        e.preventDefault();
+        if (!isPushToTalkActive || isChatRoomVisible) return;
+        if (e.code === 'Space') {
+            handleAudio(audioBtn, false, false);
+            isSpaceDown = false;
+            console.log('Push-to-talk: audio OFF');
+        }
+    };
 }
 
 /**
@@ -2974,7 +3127,7 @@ function setScreenShareBtn() {
     ) {
         isScreenSharingSupported = true;
         initScreenShareBtn.addEventListener('click', async (e) => {
-            await toggleScreenSharing();
+            await toggleScreenSharing(true);
         });
         screenShareBtn.addEventListener('click', async (e) => {
             await toggleScreenSharing();
@@ -3367,6 +3520,21 @@ function setMySettingsBtn() {
         notifyBySound = e.currentTarget.checked;
     });
 
+    if (isMobileDevice) {
+        document.getElementById('pushToTalkDiv').style.display = 'none';
+    } else {
+        // Push to talk
+        switchPushToTalk.addEventListener('change', (e) => {
+            isPushToTalkActive = e.currentTarget.checked;
+            userLog('toast', 'Push to talk active - ' + isPushToTalkActive);
+        });
+    }
+
+    switchAudioPitchBar.addEventListener('change', (e) => {
+        isAudioPitchBar = e.currentTarget.checked;
+        userLog('toast', 'Audio pitch bar active - ' + isAudioPitchBar);
+    });
+
     // make chat room draggable for desktop
     if (!isMobileDevice) dragElement(mySettings, mySettingsHeader);
 }
@@ -3427,9 +3595,9 @@ function setupMySettings() {
         openTab(e, 'tabLanguages');
     });
     // select audio input
-    audioInputSelect.addEventListener('change', (e) => {
+    audioInputSelect.addEventListener('change', async () => {
         myVideoChange = false;
-        refreshLocalMedia();
+        await refreshLocalMedia();
         lS.setLocalStorageDevices(lS.MEDIA_TYPE.audio, audioInputSelect.selectedIndex, audioInputSelect.value);
     });
     // select audio output
@@ -3438,14 +3606,14 @@ function setupMySettings() {
         lS.setLocalStorageDevices(lS.MEDIA_TYPE.speaker, audioOutputSelect.selectedIndex, audioOutputSelect.value);
     });
     // select video input
-    videoSelect.addEventListener('change', (e) => {
+    videoSelect.addEventListener('change', async () => {
         myVideoChange = true;
-        refreshLocalMedia();
+        await refreshLocalMedia();
         lS.setLocalStorageDevices(lS.MEDIA_TYPE.video, videoSelect.selectedIndex, videoSelect.value);
     });
     // select video quality
-    videoQualitySelect.addEventListener('change', (e) => {
-        setLocalVideoQuality();
+    videoQualitySelect.addEventListener('change', async (e) => {
+        await setLocalVideoQuality();
     });
     // select video fps
     videoFpsSelect.addEventListener('change', (e) => {
@@ -3546,37 +3714,39 @@ function setupVideoUrlPlayer() {
 /**
  * Refresh Local media audio video in - out
  */
-function refreshLocalMedia() {
+async function refreshLocalMedia() {
+    console.log('Refresh local media', {
+        audioStatus: myAudioStatus,
+        videoStatus: myVideoStatus,
+    });
     // some devices can't swap the video track, if already in execution.
-    stopLocalVideoTrack();
-    stopLocalAudioTrack();
-
-    navigator.mediaDevices.getUserMedia(getAudioVideoConstraints()).then(gotStream).then(gotDevices).catch(handleError);
+    await stopLocalVideoTrack();
+    await stopLocalAudioTrack();
+    const audioVideoConstraints = await getAudioVideoConstraints();
+    navigator.mediaDevices.getUserMedia(audioVideoConstraints).then(gotStream).then(gotDevices).catch(handleError);
 }
 
 /**
  * Get audio - video constraints
  * @returns {object} audio - video constraints
  */
-function getAudioVideoConstraints() {
+async function getAudioVideoConstraints() {
     const audioSource = audioInputSelect.value;
     const videoSource = videoSelect.value;
-    let videoConstraints = false;
-    if (useVideo) {
-        videoConstraints = getVideoConstraints(videoQualitySelect.value ? videoQualitySelect.value : 'default');
+    let videoConstraints = useVideo;
+    if (videoConstraints) {
+        videoConstraints = await getVideoConstraints(videoQualitySelect.value ? videoQualitySelect.value : 'default');
         videoConstraints['deviceId'] = videoSource ? { exact: videoSource } : undefined;
     }
-    let audioConstraints = {
-        deviceId: audioSource ? { exact: audioSource } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 44100,
-    };
-    const constraints = {
+    let audioConstraints = useAudio;
+    if (audioConstraints) {
+        audioConstraints = await getAudioConstraints();
+        audioConstraints['deviceId'] = audioSource ? { exact: audioSource } : undefined;
+    }
+    return {
         audio: audioConstraints,
         video: videoConstraints,
     };
-    return constraints;
 }
 
 /**
@@ -3585,8 +3755,8 @@ function getAudioVideoConstraints() {
  * @param {string} videoQuality desired video quality
  * @returns {object} video constraints
  */
-function getVideoConstraints(videoQuality) {
-    let frameRate = { max: videoMaxFrameRate };
+async function getVideoConstraints(videoQuality) {
+    const frameRate = { max: videoMaxFrameRate };
 
     switch (videoQuality) {
         case 'default':
@@ -3644,6 +3814,17 @@ function getVideoConstraints(videoQuality) {
 }
 
 /**
+ * Get audio constraints
+ */
+async function getAudioConstraints() {
+    return {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: 44100,
+    };
+}
+
+/**
  * Set local max fps: https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack/applyConstraints
  * @param {string} maxFrameRate desired max frame rate
  */
@@ -3664,9 +3845,9 @@ function setLocalMaxFps(maxFrameRate) {
 /**
  * Set local video quality: https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack/applyConstraints
  */
-function setLocalVideoQuality() {
+async function setLocalVideoQuality() {
     if (!useVideo) return;
-    let videoConstraints = getVideoConstraints(videoQualitySelect.value ? videoQualitySelect.value : 'default');
+    let videoConstraints = await getVideoConstraints(videoQualitySelect.value ? videoQualitySelect.value : 'default');
     localMediaStream
         .getVideoTracks()[0]
         .applyConstraints(videoConstraints)
@@ -3720,8 +3901,8 @@ function attachSinkId(element, sinkId) {
  * @returns {object} media Devices Info
  */
 async function gotStream(stream) {
-    await refreshMyStreamToPeers(stream, true);
     await refreshMyLocalStream(stream, true);
+    await refreshMyStreamToPeers(stream, true);
     if (myVideoChange) {
         setMyVideoStatusTrue();
         // This fix IPadPro - Tablet mirror of the back camera
@@ -4026,8 +4207,10 @@ function handleVideo(e, init, force = null) {
         ? (e.className = myVideoStatus ? className.videoOn : className.videoOff)
         : (e.target.className = myVideoStatus ? className.videoOn : className.videoOff);
 
+    videoBtn.className = myVideoStatus ? className.videoOn : className.videoOff;
+
     if (init) {
-        videoBtn.className = myVideoStatus ? className.videoOn : className.videoOff;
+        initVideoBtn.className = myVideoStatus ? className.videoOn : className.videoOff;
         setTippy(initVideoBtn, myVideoStatus ? 'Stop the video' : 'Start the video', 'top');
         initVideo.style.display = myVideoStatus ? 'block' : 'none';
         initVideoSelect.disabled = !myVideoStatus;
@@ -4053,8 +4236,8 @@ async function swapCamera() {
         // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
         camStream = await navigator.mediaDevices.getUserMedia({ video: camVideo });
         if (camStream) {
-            await refreshMyStreamToPeers(camStream);
             await refreshMyLocalStream(camStream);
+            await refreshMyStreamToPeers(camStream);
             await setMyVideoStatusTrue();
             if (!isCamMirrored) {
                 myVideo.classList.toggle('mirror');
@@ -4078,15 +4261,16 @@ async function stopLocalVideoTrack() {
 /**
  * Stop Local Audio Track
  */
-function stopLocalAudioTrack() {
+async function stopLocalAudioTrack() {
     localMediaStream.getAudioTracks()[0].stop();
 }
 
 /**
  * Enable - disable screen sharing
  * https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
+ * @param {boolean} init screen before join
  */
-async function toggleScreenSharing() {
+async function toggleScreenSharing(init = false) {
     screenMaxFrameRate = parseInt(screenFpsSelect.value);
     const constraints = {
         audio: true, // enable tab audio
@@ -4097,7 +4281,7 @@ async function toggleScreenSharing() {
 
     try {
         screenMediaPromise = isScreenStreaming
-            ? await navigator.mediaDevices.getUserMedia(getAudioVideoConstraints())
+            ? await navigator.mediaDevices.getUserMedia(await getAudioVideoConstraints())
             : await navigator.mediaDevices.getDisplayMedia(constraints);
         if (screenMediaPromise) {
             isVideoPrivacyActive = false;
@@ -4123,7 +4307,12 @@ async function toggleScreenSharing() {
                 initVideo.style.display = 'block';
                 initVideo.classList.toggle('mirror');
                 initVideo.srcObject = newStream;
+                disable(initVideoSelect, isScreenStreaming);
+                disable(initVideoBtn, isScreenStreaming);
             }
+
+            // Disable cam video when screen sharing stop
+            if (!isScreenStreaming && !init) setMyVideoOff(myPeerName);
 
             myVideo.classList.toggle('mirror');
             setScreenSharingStatus(isScreenStreaming);
@@ -4135,6 +4324,7 @@ async function toggleScreenSharing() {
         }
     } catch (err) {
         console.error('[Error] Unable to share the screen', err);
+        if (init) return;
         userLog('error', 'Unable to share the screen ' + err);
     }
 }
@@ -4146,10 +4336,7 @@ async function toggleScreenSharing() {
 function setScreenSharingStatus(status) {
     initScreenShareBtn.className = status ? className.screenOff : className.screenOn;
     screenShareBtn.className = status ? className.screenOff : className.screenOn;
-    setTippy(initScreenShareBtn, status ? 'Stop screen sharing' : 'Start screen sharing', 'right-start');
     setTippy(screenShareBtn, status ? 'Stop screen sharing' : 'Start screen sharing', 'right-start');
-    disable(initVideoSelect, status);
-    disable(initVideoBtn, status);
 }
 
 /**
@@ -4160,11 +4347,13 @@ async function setMyVideoStatusTrue() {
     // Put video status already ON
     localMediaStream.getVideoTracks()[0].enabled = true;
     myVideoStatus = true;
+    initVideoBtn.className = className.videoOn;
     videoBtn.className = className.videoOn;
     myVideoStatusIcon.className = className.videoOn;
     myVideoAvatarImage.style.display = 'none';
     emitPeerStatus('video', myVideoStatus);
     setTippy(videoBtn, 'Stop the video', 'right-start');
+    setTippy(initVideoBtn, 'Stop the video', 'top');
 }
 
 /**
@@ -4261,6 +4450,7 @@ async function refreshMyStreamToPeers(stream, localAudioTrackChange = false) {
  * @param {boolean} localAudioTrackChange default false
  */
 async function refreshMyLocalStream(stream, localAudioTrackChange = false) {
+    // enable video
     if (useVideo || isScreenStreaming) stream.getVideoTracks()[0].enabled = true;
 
     // enable audio
@@ -4312,13 +4502,6 @@ async function refreshMyLocalStream(stream, localAudioTrackChange = false) {
             toggleScreenSharing();
         };
     }
-
-    /**
-     * When you stop the screen sharing, on default i turn back to the webcam with video stream ON.
-     * If you want the webcam with video stream OFF, just disable it with the button (Stop the video),
-     * before to stop the screen sharing.
-     */
-    if (useVideo && myVideoStatus === false) localMediaStream.getVideoTracks()[0].enabled = false;
 }
 
 /**
@@ -5349,6 +5532,23 @@ async function emitPeerStatus(element, status) {
 }
 
 /**
+ * Handle hide myself from room view
+ * @param {boolean} isHideMeActive
+ */
+function handleHideMe(isHideMeActive) {
+    const myVideoWrap = getId('myVideoWrap');
+    const myVideoPinBtn = getId('myVideoPinBtn');
+    if (isHideMeActive && isVideoPinned) myVideoPinBtn.click();
+    myVideoWrap.style.display = isHideMeActive ? 'none' : 'inline-block';
+    hideMeBtn.className = isHideMeActive ? className.hideMeOn : className.hideMeOff;
+    hideMeBtn.style.color = isHideMeActive ? 'red' : 'black';
+    isHideMeActive ? playSound('off') : playSound('on');
+    if (Object.keys(peerConnections).length === 1) {
+        resizeVideoMedia();
+    }
+}
+
+/**
  * Set my Hand Status and Icon
  */
 function setMyHandStatus() {
@@ -5377,6 +5577,7 @@ function setMyAudioStatus(status) {
     setTippy(myAudioStatusIcon, status ? 'My audio is on' : 'My audio is off', 'bottom');
     setTippy(audioBtn, status ? 'Stop the audio' : 'Start the audio', 'right-start');
     status ? playSound('on') : playSound('off');
+    console.log('My audio status', status);
 }
 
 /**
@@ -5394,6 +5595,7 @@ function setMyVideoStatus(status) {
         setTippy(videoBtn, status ? 'Stop the video' : 'Start the video', 'right-start');
     }
     status ? playSound('on') : playSound('off');
+    console.log('My video status', status);
 }
 
 /**
@@ -5744,7 +5946,8 @@ function setMyAudioOn(peer_name) {
  * @param {string} peer_name peer name
  */
 function setMyVideoOff(peer_name) {
-    if (myVideoStatus === false || !useVideo) return;
+    if (!useVideo) return;
+    //if (myVideoStatus === false || !useVideo) return;
     localMediaStream.getVideoTracks()[0].enabled = false;
     myVideoStatus = localMediaStream.getVideoTracks()[0].enabled;
     videoBtn.className = className.videoOff;
@@ -7302,6 +7505,7 @@ function bytesToSize(bytes) {
  * @param {object} data peer audio
  */
 function handlePeerVolume(data) {
+    if (!isAudioPitchBar) return;
     let peer_id = data.peer_id;
     let element = getId(peer_id + '_pitch_bar');
     let remoteVideoWrap = getId(peer_id + '_videoWrap');
@@ -7311,11 +7515,11 @@ function handlePeerVolume(data) {
         element.style.backgroundColor = 'orange';
     }
     element.style.height = volume + '%';
-    remoteVideoWrap.classList.toggle('speaking');
+    //remoteVideoWrap.classList.toggle('speaking');
     setTimeout(function () {
         element.style.backgroundColor = '#19bb5c';
         element.style.height = '0%';
-        remoteVideoWrap.classList.toggle('speaking');
+        //remoteVideoWrap.classList.toggle('speaking');
     }, 700);
 }
 
@@ -7324,6 +7528,7 @@ function handlePeerVolume(data) {
  * @param {object} data my audio
  */
 function handleMyVolume(data) {
+    if (!isAudioPitchBar) return;
     let element = getId('myPitchBar');
     let volume = data.volume + 25;
     if (!element) return;
@@ -7331,11 +7536,11 @@ function handleMyVolume(data) {
         element.style.backgroundColor = 'orange';
     }
     element.style.height = volume + '%';
-    myVideoWrap.classList.toggle('speaking');
+    //myVideoWrap.classList.toggle('speaking');
     setTimeout(function () {
         element.style.backgroundColor = '#19bb5c';
         element.style.height = '0%';
-        myVideoWrap.classList.toggle('speaking');
+        //myVideoWrap.classList.toggle('speaking');
     }, 700);
 }
 
