@@ -38,7 +38,7 @@ dependencies: {
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.2.76
+ * @version 1.2.83
  *
  */
 
@@ -208,6 +208,19 @@ if (configChatGPT.enabled) {
     }
 }
 
+// IP Whitelist
+const ipWhitelist = {
+    enabled: getEnvBoolean(process.env.IP_WHITELIST_ENABLED),
+    allowed: process.env.IP_WHITELIST_ALLOWED ? JSON.parse(process.env.IP_WHITELIST_ALLOWED) : [],
+};
+
+// stats configuration
+const statsData = {
+    enabled: process.env.STATS_ENABLED ? getEnvBoolean(process.env.STATS_ENABLED) : true,
+    src: process.env.STATS_SCR || 'https://stats.mirotalk.com/script.js',
+    id: process.env.STATS_ID || 'c7615aa7-ceec-464a-baba-54cb605d7261',
+};
+
 // directory
 const dir = {
     public: path.join(__dirname, '../../', 'public'),
@@ -235,6 +248,19 @@ app.use(express.json()); // Api parse body data as json
 app.use(express.static(dir.public)); // Use all static files from the public folder
 app.use(bodyParser.urlencoded({ extended: true })); // Need for Slack API body parser
 app.use(apiBasePath + '/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument)); // api docs
+
+// Restrict access to specified IP
+app.use((req, res, next) => {
+    if (!ipWhitelist.enabled) return next();
+    const clientIP = getIP(req);
+    log.debug('Check IP', clientIP);
+    if (ipWhitelist.allowed.includes(clientIP)) {
+        next();
+    } else {
+        log.info('Forbidden: Access denied from this IP address', { clientIP: clientIP });
+        res.status(403).json({ error: 'Forbidden', message: 'Access denied from this IP address.' });
+    }
+});
 
 // Logs requests
 app.use((req, res, next) => {
@@ -283,6 +309,12 @@ app.get(['/'], (req, res) => {
     } else {
         res.sendFile(views.landing);
     }
+});
+
+// Get stats endpoint
+app.get(['/stats'], (req, res) => {
+    //log.debug('Send stats', statsData);
+    res.send(statsData);
 });
 
 // mirotalk about
@@ -539,8 +571,10 @@ async function ngrokStart() {
         // server settings
         log.debug('settings', {
             iceServers: iceServers,
+            stats: statsData,
             host: hostCfg,
             presenters: roomPresenters,
+            ip_whitelist: ipWhitelist,
             ngrok: {
                 ngrok_enabled: ngrokEnabled,
                 ngrok_token: ngrokAuthToken,
@@ -594,8 +628,10 @@ server.listen(port, null, () => {
         // server settings
         log.debug('settings', {
             iceServers: iceServers,
+            stats: statsData,
             host: hostCfg,
             presenters: roomPresenters,
+            ip_whitelist: ipWhitelist,
             server: host,
             test_ice_servers: testStunTurn,
             api_docs: api_docs,
@@ -1435,7 +1471,7 @@ function getActiveRooms() {
  * @returns string ip
  */
 function getIP(req) {
-    return req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    return req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
 }
 
 /**
