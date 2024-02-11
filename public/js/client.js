@@ -15,7 +15,7 @@
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.2.83
+ * @version 1.2.85
  *
  */
 
@@ -98,6 +98,7 @@ const icons = {
     fileSend: '<i class="fas fa-file-export"></i>',
     fileReceive: '<i class="fas fa-file-import"></i>',
     codecs: '<i class="fa-solid fa-film"></i>',
+    theme: '<i class="fas fa-fill-drip"></i>',
 };
 
 // Whiteboard and fileSharing
@@ -502,6 +503,55 @@ const useAvatarSvg = true; // if false the cam-Off avatar = images.avatar
 const ZOOM_CENTER_MODE = false;
 const ZOOM_IN_OUT_ENABLED = true; // Video Zoom in/out default (true)
 
+// Color Picker:
+
+const themeCustom = {
+    input: getId('themeColorPicker'),
+    check: getId('keepCustomTheme'),
+    color: lsSettings.theme_color ? lsSettings.theme_color : '#000000',
+    keep: lsSettings.theme_custom ? lsSettings.theme_custom : false,
+};
+
+const pickr = Pickr.create({
+    el: themeCustom.input,
+    theme: 'classic', // or 'monolith', or 'nano'
+    default: themeCustom.color,
+    useAsButton: true,
+    swatches: [
+        'rgba(244, 67, 54, 1)',
+        'rgba(233, 30, 99, 0.95)',
+        'rgba(156, 39, 176, 0.9)',
+        'rgba(103, 58, 183, 0.85)',
+        'rgba(63, 81, 181, 0.8)',
+        'rgba(33, 150, 243, 0.75)',
+        'rgba(3, 169, 244, 0.7)',
+        'rgba(0, 188, 212, 0.7)',
+        'rgba(0, 150, 136, 0.75)',
+        'rgba(76, 175, 80, 0.8)',
+        'rgba(139, 195, 74, 0.85)',
+        'rgba(205, 220, 57, 0.9)',
+        'rgba(255, 235, 59, 0.95)',
+        'rgba(255, 193, 7, 1)',
+    ],
+    components: {
+        preview: true,
+        opacity: true,
+        hue: true,
+    },
+})
+    .on('init', (pickr) => {
+        themeCustom.input.value = pickr.getSelectedColor().toHEXA().toString(0);
+    })
+    .on('change', (color) => {
+        themeCustom.color = color.toHEXA().toString();
+        themeCustom.input.value = themeCustom.color;
+        setCustomTheme();
+    })
+    .on('changestop', () => {
+        lsSettings.theme_color = themeCustom.color;
+        lS.setSettings(lsSettings);
+    });
+
 // misc
 let swBg = 'rgba(0, 0, 0, 0.7)'; // swAlert background color
 let callElapsedTime; // count time
@@ -512,8 +562,7 @@ let isDocumentOnFullScreen = false;
 let myPeerId; // This socket.id
 let myPeerUUID = getUUID(); // Unique peer id
 let myPeerName = getPeerName();
-let myUsername = getPeerUsername(); // default false if not passed by query params
-let myPassword = getPeerPassword(); // default false if not passed by query params
+let myToken = getPeerToken(); // peer JWT
 let isPresenter = false; // True Who init the room (aka first peer joined)
 let myHandStatus = false;
 let myVideoStatus = false;
@@ -922,35 +971,19 @@ function getNotify() {
 }
 
 /**
- * Get Peer username
- * @returns {mixed} boolean false or username string
+ * Get Peer JWT
+ * @returns {mixed} boolean false or token string
  */
-function getPeerUsername() {
-    if (window.sessionStorage.peer_username) return window.sessionStorage.peer_username;
+function getPeerToken() {
+    if (window.sessionStorage.peer_token) return window.sessionStorage.peer_token;
     let qs = new URLSearchParams(window.location.search);
-    let username = filterXSS(qs.get('username'));
-    let queryUsername = false;
-    if (username) {
-        queryUsername = username;
+    let token = filterXSS(qs.get('token'));
+    let queryToken = false;
+    if (token) {
+        queryToken = token;
     }
-    console.log('Direct join', { username: queryUsername });
-    return queryUsername;
-}
-
-/**
- * Get Peer password
- * @returns {mixed} boolean false or password string
- */
-function getPeerPassword() {
-    if (window.sessionStorage.peer_password) return window.sessionStorage.peer_password;
-    let qs = new URLSearchParams(window.location.search);
-    let password = filterXSS(qs.get('password'));
-    let queryPassword = false;
-    if (password) {
-        queryPassword = password;
-    }
-    console.log('Direct join', { password: queryPassword });
-    return queryPassword;
+    console.log('Direct join', { token: queryToken });
+    return queryToken;
 }
 
 /**
@@ -1318,7 +1351,7 @@ async function whoAreYou() {
         console.log(`11.1 Check if ${myPeerName} exist in the room`, roomId);
 
         if (await checkUserName()) {
-            return userNameAlreadyInRoom();
+            if (!myToken) return userNameAlreadyInRoom(); // #209 Hack...
         }
 
         checkPeerAudioVideo();
@@ -1727,8 +1760,7 @@ async function joinToChannel() {
         peer_info: peerInfo,
         peer_uuid: myPeerUUID,
         peer_name: myPeerName,
-        peer_username: myUsername,
-        peer_password: myPassword,
+        peer_token: myToken,
         peer_video: useVideo,
         peer_audio: useAudio,
         peer_video_status: myVideoStatus,
@@ -2174,10 +2206,34 @@ function handleRemovePeer(config) {
 }
 
 /**
+ * Set custom theme
+ */
+function setCustomTheme() {
+    const color = themeCustom.color;
+    swBg = `radial-gradient(${color}, ${color})`;
+    setSP('--body-bg', `radial-gradient(${color}, ${color})`);
+    setSP('--msger-bg', `radial-gradient(${color}, ${color})`);
+    setSP('--msger-private-bg', `radial-gradient(${color}, ${color})`);
+    setSP('--wb-bg', `radial-gradient(${color}, ${color})`);
+    setSP('--elem-border-color', '0.5px solid rgb(255 255 255 / 32%)');
+    setSP('--navbar-bg', 'rgba(0, 0, 0, 0.2)');
+    setSP('--select-bg', `${color}`);
+    setSP('--tab-btn-active', `${color}`);
+    setSP('--box-shadow', '0px 8px 16px 0px rgba(0, 0, 0, 0.2)');
+    setSP('--left-msg-bg', '#252d31');
+    setSP('--right-msg-bg', `${color}`);
+    setSP('--private-msg-bg', '#6b1226');
+    setSP('--btn-bar-bg-color', '#FFFFFF');
+    setSP('--btn-bar-color', '#000000');
+    document.body.style.background = `radial-gradient(${color}, ${color})`;
+}
+
+/**
  * Set mirotalk theme | dark | grey | ...
- * @param {string} theme type
  */
 function setTheme() {
+    if (themeCustom.keep) return setCustomTheme();
+
     mirotalkTheme.selectedIndex = lsSettings.theme;
     const theme = mirotalkTheme.value;
     switch (theme) {
@@ -2188,6 +2244,7 @@ function setTheme() {
             setSP('--msger-bg', 'radial-gradient(#393939, #000000)');
             setSP('--msger-private-bg', 'radial-gradient(#393939, #000000)');
             setSP('--wb-bg', 'radial-gradient(#393939, #000000)');
+            setSP('--elem-border-color', 'none');
             setSP('--navbar-bg', 'rgba(0, 0, 0, 0.2)');
             setSP('--select-bg', '#2c2c2c');
             setSP('--tab-btn-active', 'rgb(30 29 29)');
@@ -2206,6 +2263,7 @@ function setTheme() {
             setSP('--body-bg', 'radial-gradient(#666, #333)');
             setSP('--msger-bg', 'radial-gradient(#666, #333)');
             setSP('--wb-bg', 'radial-gradient(#797979, #000)');
+            setSP('--elem-border-color', 'none');
             setSP('--navbar-bg', 'rgba(0, 0, 0, 0.2)');
             setSP('--select-bg', '#2c2c2c');
             setSP('--tab-btn-active', 'rgb(30 29 29)');
@@ -2225,6 +2283,7 @@ function setTheme() {
             setSP('--body-bg', 'radial-gradient(#003934, #001E1A)');
             setSP('--msger-bg', 'radial-gradient(#003934, #001E1A)');
             setSP('--wb-bg', 'radial-gradient(#003934, #001E1A)');
+            setSP('--elem-border-color', 'none');
             setSP('--navbar-bg', 'rgba(0, 0, 0, 0.2)');
             setSP('--select-bg', '#001E1A');
             setSP('--tab-btn-active', '#003934');
@@ -2244,6 +2303,7 @@ function setTheme() {
             setSP('--body-bg', 'radial-gradient(#306bac, #141B41)');
             setSP('--msger-bg', 'radial-gradient(#306bac, #141B41)');
             setSP('--wb-bg', 'radial-gradient(#306bac, #141B41)');
+            setSP('--elem-border-color', 'none');
             setSP('--navbar-bg', 'rgba(0, 0, 0, 0.2)');
             setSP('--select-bg', '#141B41');
             setSP('--tab-btn-active', '#306bac');
@@ -4626,6 +4686,18 @@ function setMySettingsBtn() {
     resumeRecBtn.addEventListener('click', (e) => {
         resumeRecording();
     });
+    // Styles
+    themeCustom.check.onchange = (e) => {
+        themeCustom.keep = e.currentTarget.checked;
+        themeSelect.disabled = themeCustom.keep;
+        lsSettings.theme_custom = themeCustom.keep;
+        lsSettings.theme_color = themeCustom.color;
+        lS.setSettings(lsSettings);
+        setTheme();
+        userLog('toast', `${icons.theme} Custom theme keep ` + (themeCustom.keep ? 'ON' : 'OFF'));
+        playSound('switch');
+        e.target.blur();
+    };
 }
 
 /**
@@ -4875,6 +4947,10 @@ function loadSettingsFromLocalStorage() {
     switchShare.checked = notify;
     switchAudioPitchBar.checked = isAudioPitchBar;
     switchH264Recording.checked = recPrioritizeH264;
+
+    themeCustom.check.checked = themeCustom.keep;
+    themeSelect.disabled = themeCustom.keep;
+    themeCustom.input.value = themeCustom.color;
 
     switchAutoGainControl.checked = lsSettings.mic_auto_gain_control;
     switchEchoCancellation.checked = lsSettings.mic_echo_cancellations;
@@ -5137,7 +5213,10 @@ async function changeAudioDestination(audioElement = false) {
         const audioElements = audioMediaContainer.querySelectorAll('audio');
         // change audio output for all participants audio
         audioElements.forEach(async (audioElement) => {
-            await attachSinkId(audioElement, audioDestination);
+            // discard my own audio on this device, so I won't hear myself.
+            if (audioElement.id != 'myAudio') {
+                await attachSinkId(audioElement, audioDestination);
+            }
         });
     }
 }
@@ -5361,7 +5440,7 @@ function shareRoomByEmail() {
 function getRoomURL() {
     return myRoomUrl;
     // return isHostProtected && isPeerAuthEnabled
-    //     ? window.location.origin + '/join/?room=' + roomId + '&username=' + myUsername + '&password=' + myPassword
+    //     ? window.location.origin + '/join/?room=' + roomId + '&token=' + myToken
     //     : myRoomUrl;
 }
 
