@@ -39,7 +39,7 @@ dependencies: {
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.2.87
+ * @version 1.2.89
  *
  */
 
@@ -69,7 +69,7 @@ const isHttps = process.env.HTTPS == 'true';
 const port = process.env.PORT || 3000; // must be the same to client.js signalingServerPort
 const host = `http${isHttps ? 's' : ''}://${domain}:${port}`;
 
-let io, server, authHost;
+let server, authHost;
 
 if (isHttps) {
     const fs = require('fs');
@@ -82,12 +82,42 @@ if (isHttps) {
     server = http.createServer(app);
 }
 
+// Cors
+
+const cors_origin = process.env.CORS_ORIGIN;
+const cors_methods = process.env.CORS_METHODS;
+
+let corsOrigin = '*';
+let corsMethods = ['GET', 'POST'];
+
+if (cors_origin && cors_origin !== '*') {
+    try {
+        corsOrigin = JSON.parse(cors_origin);
+    } catch (error) {
+        log.error('Error parsing CORS_ORIGIN', error.message);
+    }
+}
+
+if (cors_methods && cors_methods !== '') {
+    try {
+        corsMethods = JSON.parse(cors_methods);
+    } catch (error) {
+        log.error('Error parsing CORS_METHODS', error.message);
+    }
+}
+
+const corsOptions = {
+    origin: corsOrigin,
+    methods: corsMethods,
+};
+
 /*  
     Set maxHttpBufferSize from 1e6 (1MB) to 1e7 (10MB)
 */
-io = new Server({
+const io = new Server({
     maxHttpBufferSize: 1e7,
     transports: ['websocket'],
+    cors: corsOptions,
 }).listen(server);
 
 // console.log(io);
@@ -250,7 +280,7 @@ const sockets = {}; // collect sockets
 const peers = {}; // collect peers info grp by channels
 const presenters = {}; // collect presenters grp by channels
 
-app.use(cors()); // Enable All CORS Requests for all origins
+app.use(cors(corsOptions)); // Enable CORS with options
 app.use(compression()); // Compress all HTTP responses using GZip
 app.use(express.json()); // Api parse body data as json
 app.use(express.static(dir.public)); // Use all static files from the public folder
@@ -494,8 +524,7 @@ app.post(['/login'], (req, res) => {
 
 // API request meeting room endpoint
 app.post([`${apiBasePath}/meeting`], (req, res) => {
-    const host = req.headers.host;
-    const authorization = req.headers.authorization;
+    const { host, authorization } = req.headers;
     const api = new ServerApi(host, authorization, api_key_secret);
     if (!api.isAuthorized()) {
         log.debug('MiroTalk get meeting - Unauthorized', {
@@ -505,8 +534,7 @@ app.post([`${apiBasePath}/meeting`], (req, res) => {
         return res.status(403).json({ error: 'Unauthorized!' });
     }
     const meetingURL = api.getMeetingURL();
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ meeting: meetingURL }));
+    res.json({ meeting: meetingURL });
     log.debug('MiroTalk get meeting - Authorized', {
         header: req.headers,
         body: req.body,
@@ -516,8 +544,7 @@ app.post([`${apiBasePath}/meeting`], (req, res) => {
 
 // API request join room endpoint
 app.post([`${apiBasePath}/join`], (req, res) => {
-    const host = req.headers.host;
-    const authorization = req.headers.authorization;
+    const { host, authorization } = req.headers;
     const api = new ServerApi(host, authorization, api_key_secret);
     if (!api.isAuthorized()) {
         log.debug('MiroTalk get join - Unauthorized', {
@@ -527,8 +554,7 @@ app.post([`${apiBasePath}/join`], (req, res) => {
         return res.status(403).json({ error: 'Unauthorized!' });
     }
     const joinURL = api.getJoinURL(req.body);
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ join: joinURL }));
+    res.json({ join: joinURL });
     log.debug('MiroTalk get join - Authorized', {
         header: req.headers,
         body: req.body,
@@ -588,6 +614,44 @@ app.get('*', function (req, res) {
 });
 
 /**
+ * Get Server config
+ * @param {string} tunnel
+ * @returns server config
+ */
+function getServerConfig(tunnel = false) {
+    return {
+        iceServers: iceServers,
+        stats: statsData,
+        host: hostCfg,
+        jwtCfg: jwtCfg,
+        presenters: roomPresenters,
+        ip_whitelist: ipWhitelist,
+        ngrok: {
+            ngrok_enabled: ngrokEnabled,
+            ngrok_token: ngrokEnabled ? ngrokAuthToken : '',
+        },
+        server: host,
+        cors: corsOptions,
+        server_tunnel: tunnel,
+        test_ice_servers: testStunTurn,
+        api_docs: api_docs,
+        api_key_secret: api_key_secret,
+        use_self_signed_certificate: isHttps,
+        turn_enabled: turnServerEnabled,
+        ip_lookup_enabled: IPLookupEnabled,
+        chatGPT_enabled: configChatGPT.enabled,
+        slack_enabled: slackEnabled,
+        sentry_enabled: sentryEnabled,
+        survey_enabled: surveyEnabled,
+        redirect_enabled: redirectEnabled,
+        survey_url: surveyURL,
+        redirect_url: redirectURL,
+        node_version: process.versions.node,
+        app_version: packageJson.version,
+    };
+}
+
+/**
  * Expose server to external with https tunnel using ngrok
  * https://ngrok.com
  */
@@ -596,41 +660,9 @@ async function ngrokStart() {
         await ngrok.authtoken(ngrokAuthToken);
         await ngrok.connect(port);
         const api = ngrok.getApi();
-        //const data = JSON.parse(await api.get('api/tunnels')); // v3
-        const data = await api.listTunnels(); // v4
-        const pu0 = data.tunnels[0].public_url;
-        const pu1 = data.tunnels[1].public_url;
-        const tunnelHttps = pu0.startsWith('https') ? pu0 : pu1;
-        // server settings
-        log.info('settings', {
-            iceServers: iceServers,
-            stats: statsData,
-            host: hostCfg,
-            jwtCfg: jwtCfg,
-            presenters: roomPresenters,
-            ip_whitelist: ipWhitelist,
-            ngrok: {
-                ngrok_enabled: ngrokEnabled,
-                ngrok_token: ngrokAuthToken,
-            },
-            server: host,
-            server_tunnel: tunnelHttps,
-            test_ice_servers: testStunTurn,
-            api_docs: api_docs,
-            api_key_secret: api_key_secret,
-            use_self_signed_certificate: isHttps,
-            turn_enabled: turnServerEnabled,
-            ip_lookup_enabled: IPLookupEnabled,
-            chatGPT_enabled: configChatGPT.enabled,
-            slack_enabled: slackEnabled,
-            sentry_enabled: sentryEnabled,
-            survey_enabled: surveyEnabled,
-            redirect_enabled: redirectEnabled,
-            survey_url: surveyURL,
-            redirect_url: redirectURL,
-            node_version: process.versions.node,
-            app_version: packageJson.version,
-        });
+        const list = await api.listTunnels();
+        const tunnel = list.tunnels[0].public_url;
+        log.info('Server config', getServerConfig(tunnel));
     } catch (err) {
         log.warn('[Error] ngrokStart', err.body);
         process.exit(1);
@@ -659,31 +691,7 @@ server.listen(port, null, () => {
     if (ngrokEnabled && isHttps === false) {
         ngrokStart();
     } else {
-        // server settings
-        log.info('settings', {
-            iceServers: iceServers,
-            stats: statsData,
-            host: hostCfg,
-            jwtCfg: jwtCfg,
-            presenters: roomPresenters,
-            ip_whitelist: ipWhitelist,
-            server: host,
-            test_ice_servers: testStunTurn,
-            api_docs: api_docs,
-            api_key_secret: api_key_secret,
-            use_self_signed_certificate: isHttps,
-            turn_enabled: turnServerEnabled,
-            ip_lookup_enabled: IPLookupEnabled,
-            chatGPT_enabled: configChatGPT.enabled,
-            slack_enabled: slackEnabled,
-            sentry_enabled: sentryEnabled,
-            survey_enabled: surveyEnabled,
-            redirect_enabled: redirectEnabled,
-            survey_url: surveyURL,
-            redirect_url: redirectURL,
-            node_version: process.versions.node,
-            app_version: packageJson.version,
-        });
+        log.info('Server config', getServerConfig());
     }
 });
 
