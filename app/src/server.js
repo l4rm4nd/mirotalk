@@ -39,7 +39,7 @@ dependencies: {
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.2.89
+ * @version 1.2.92
  *
  */
 
@@ -153,7 +153,7 @@ const swaggerDocument = yamlJS.load(path.join(__dirname + '/../api/swagger.yaml'
 const { v4: uuidV4 } = require('uuid');
 const apiBasePath = '/api/v1'; // api endpoint path
 const api_docs = host + apiBasePath + '/docs'; // api docs
-const api_key_secret = process.env.API_KEY_SECRET || 'mirotalk_default_secret';
+const api_key_secret = process.env.API_KEY_SECRET || 'mirotalkp2p_default_secret';
 
 // Ngrok config
 const ngrok = require('ngrok');
