@@ -15,7 +15,7 @@
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.3.02
+ * @version 1.3.14
  *
  */
 
@@ -1600,7 +1600,6 @@ async function loadLocalStorage() {
     if (useVideo && initVideoSelect.value) {
         await changeInitCamera(initVideoSelect.value);
         await handleLocalCameraMirror();
-        await checkInitConfig();
     }
     // Refresh audio
     if (useAudio && audioInputSelect.value) {
@@ -1608,6 +1607,9 @@ async function loadLocalStorage() {
     }
     // Refresh speaker
     if (audioOutputSelect.value) await changeAudioDestination();
+
+    // Check init audio/video
+    await checkInitConfig();
 }
 
 /**
@@ -1658,43 +1660,34 @@ async function changeInitCamera(deviceId) {
     const videoConstraints = await getVideoConstraints('default');
     videoConstraints['deviceId'] = { exact: deviceId };
 
-    navigator.mediaDevices
+    await navigator.mediaDevices
         .getUserMedia({ video: videoConstraints })
         .then((camStream) => {
-            updateLocalVideoMediaStream(camStream);
+            updateInitLocalVideoMediaStream(camStream);
         })
         .catch(async (err) => {
             console.error('Error accessing init video device', err);
-            // If error is due to constraints, fallback to default constraints or no constraints or something else
-            if (
-                err.name === 'OverconstrainedError' ||
-                err.name === 'ConstraintNotSatisfiedError' ||
-                err.name === 'DOMException'
-            ) {
-                console.warn('Fallback to default or no constraints for init video');
-                try {
-                    const camStream = await navigator.mediaDevices.getUserMedia({
-                        video: {
-                            deviceId: {
-                                exact: deviceId, // Specify the exact device ID you want to access
-                            },
+            console.warn('Fallback to default constraints');
+            try {
+                const camStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        deviceId: {
+                            exact: deviceId, // Specify the exact device ID you want to access
                         },
-                    }); // Fallback to default constraints
-                    updateLocalVideoMediaStream(camStream);
-                } catch (fallbackErr) {
-                    console.error('Error accessing init video device with default constraints', fallbackErr);
-                    reloadBrowser(err);
-                }
-            } else {
+                    },
+                }); // Fallback to default constraints
+                updateInitLocalVideoMediaStream(camStream);
+            } catch (fallbackErr) {
+                console.error('Error accessing init video device with default constraints', fallbackErr);
                 reloadBrowser(err);
             }
         });
 
     /**
-     * Update Local Video Stream
+     * Update Init/Local Video Stream
      * @param {MediaStream} camStream
      */
-    function updateLocalVideoMediaStream(camStream) {
+    function updateInitLocalVideoMediaStream(camStream) {
         if (camStream) {
             // We going to update init video stream
             initVideo.srcObject = camStream;
@@ -1738,28 +1731,25 @@ async function changeLocalCamera(deviceId) {
     videoConstraints['deviceId'] = { exact: deviceId };
     console.log('videoConstraints', videoConstraints);
 
-    navigator.mediaDevices
+    await navigator.mediaDevices
         .getUserMedia({ video: videoConstraints })
         .then((camStream) => {
             updateLocalVideoMediaStream(camStream);
         })
         .catch(async (err) => {
             console.error('Error accessing local video device:', err);
-            // If error is due to constraints, fallback to default constraints or no constraints or something else
-            if (
-                err.name === 'OverconstrainedError' ||
-                err.name === 'ConstraintNotSatisfiedError' ||
-                err.name === 'DOMException'
-            ) {
-                console.warn('Fallback to default or no constraints for local video');
-                try {
-                    const camStream = await navigator.mediaDevices.getUserMedia({ video: true }); // Fallback to default constraints
-                    updateLocalVideoMediaStream(camStream);
-                } catch (fallbackErr) {
-                    console.error('Error accessing init video device with default constraints', fallbackErr);
-                    printError(err);
-                }
-            } else {
+            console.warn('Fallback to default constraints');
+            try {
+                const camStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        deviceId: {
+                            exact: deviceId, // Specify the exact device ID you want to access
+                        },
+                    },
+                });
+                updateLocalVideoMediaStream(camStream);
+            } catch (fallbackErr) {
+                console.error('Error accessing init video device with default constraints', fallbackErr);
                 printError(err);
             }
         });
@@ -1802,7 +1792,7 @@ async function changeLocalMicrophone(deviceId) {
     audioConstraints['deviceId'] = { exact: deviceId };
     console.log('audioConstraints', audioConstraints);
 
-    navigator.mediaDevices
+    await navigator.mediaDevices
         .getUserMedia({ audio: audioConstraints })
         .then((micStream) => {
             myAudio.srcObject = micStream;
@@ -2697,24 +2687,16 @@ async function setupLocalVideoMedia() {
         await updateLocalVideoMediaStream(stream);
     } catch (err) {
         console.error('Error accessing video device', err);
-        // If error is due to constraints, fallback to default constraints or no constraints or something else
-        if (
-            err.name === 'OverconstrainedError' ||
-            err.name === 'ConstraintNotSatisfiedError' ||
-            err.name === 'DOMException'
-        ) {
-            console.warn('Fallback to default or no constraints for video');
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true }); // Fallback to default constraints
-                await updateLocalVideoMediaStream(stream);
-            } catch (fallbackErr) {
-                console.error('Error accessing video device with default constraints', fallbackErr);
-                handleMediaError('video', fallbackErr);
-            }
-        } else {
-            handleMediaError('video', err);
+        console.warn('Fallback to default constraints');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            await updateLocalVideoMediaStream(stream);
+        } catch (fallbackErr) {
+            console.error('Error accessing video device with default constraints', fallbackErr);
+            handleMediaError('video', fallbackErr);
         }
     }
+
     /**
      * Update Local Media Stream
      * @param {MediaStream} stream
@@ -2767,7 +2749,8 @@ async function setupLocalAudioMedia() {
 function handleMediaError(mediaType, err) {
     playSound('alert');
     //
-    let errMessage = err.message;
+    let errMessage = err;
+
     switch (err.name) {
         case 'NotFoundError':
         case 'DevicesNotFoundError':
@@ -2797,7 +2780,7 @@ function handleMediaError(mediaType, err) {
         <ul style="text-align: left">
             <li>Media type: ${mediaType}</li>
             <li>Error name: ${err.name}</li>
-            <li>Error message: ${errMessage}</li>
+            <li>Error message: <p style="color: red">${errMessage}</p></li>
             <li>Common: <a href="https://blog.addpipe.com/common-getusermedia-errors" target="_blank">getUserMedia errors</a></li>
         </ul>
     `;
@@ -2998,7 +2981,7 @@ async function loadLocalMedia(stream, kind) {
 
             handleVideoPinUnpin(myLocalMedia.id, myVideoPinBtn.id, myVideoWrap.id, myLocalMedia.id);
 
-            buttons.local.showVideoPipBtn && handlePictureInPicture(myVideoPiPBtn.id, myLocalMedia.id);
+            buttons.local.showVideoPipBtn && handlePictureInPicture(myVideoPiPBtn.id, myLocalMedia.id, myPeerId);
 
             ZOOM_IN_OUT_ENABLED && handleVideoZoomInOut(myVideoZoomInBtn.id, myVideoZoomOutBtn.id, myLocalMedia.id);
 
@@ -3313,7 +3296,7 @@ async function loadRemoteMediaStream(stream, peers, peer_id, kind) {
             handleVideoToggleMirror(remoteMedia.id, remoteVideoMirrorBtn.id);
 
             // handle vide picture in picture
-            buttons.remote.showVideoPipBtn && handlePictureInPicture(remoteVideoPiPBtn.id, remoteMedia.id);
+            buttons.remote.showVideoPipBtn && handlePictureInPicture(remoteVideoPiPBtn.id, remoteMedia.id, peer_id);
 
             // handle video zoomIn/Out
             ZOOM_IN_OUT_ENABLED &&
@@ -4009,14 +3992,23 @@ function handleVideoZoomInOut(zoomInBtnId, zoomOutBtnId, mediaId, peerId = null)
  *
  * @param {string} btnId
  * @param {string} videoId
+ * @param {string} peerId
  */
-function handlePictureInPicture(btnId, videoId) {
+function handlePictureInPicture(btnId, videoId, peerId) {
     const btnPiP = getId(btnId);
     const video = getId(videoId);
+    const myVideoStatus = getId('myVideoStatusIcon');
+    const remoteVideoStatus = getId(peerId + '_videoStatus');
     btnPiP.addEventListener('click', () => {
         if (video.pictureInPictureElement) {
             video.exitPictureInPicture();
         } else if (document.pictureInPictureEnabled) {
+            if (
+                (myVideoStatus && myVideoStatus.className === className.videoOff) ||
+                (remoteVideoStatus && remoteVideoStatus.className === className.videoOff)
+            ) {
+                return msgPopup('warning', 'Prohibit Picture-in-Picture (PIP) on disabled video', 'top-end', 6000);
+            }
             video.requestPictureInPicture().catch((error) => {
                 console.error('Failed to enter Picture-in-Picture mode:', error);
                 msgPopup('warning', error.message, 'top-end', 6000);

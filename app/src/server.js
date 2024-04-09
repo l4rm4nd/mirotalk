@@ -39,7 +39,7 @@ dependencies: {
  * @license For commercial use or closed source, contact us at license.mirotalk@gmail.com or purchase directly from CodeCanyon
  * @license CodeCanyon: https://codecanyon.net/item/mirotalk-p2p-webrtc-realtime-video-conferences/38376661
  * @author  Miroslav Pejic - miroslav.pejic.85@gmail.com
- * @version 1.3.02
+ * @version 1.3.14
  *
  */
 
@@ -65,18 +65,40 @@ const log = new Logs('server');
 const packageJson = require('../../package.json');
 
 const domain = process.env.HOST || 'localhost';
-const isHttps = process.env.HTTPS == 'true';
+const isHttps = process.env.HTTPS == 'true'; // Use self-signed certificates instead of Certbot and Let's Encrypt
 const port = process.env.PORT || 3000; // must be the same to client.js signalingServerPort
 const host = `http${isHttps ? 's' : ''}://${domain}:${port}`;
 
-let server, authHost;
+const authHost = new Host(); // Authenticated IP by Login
+
+let server;
 
 if (isHttps) {
     const fs = require('fs');
+
+    // Define paths to the SSL key and certificate files
+    const keyPath = path.join(__dirname, '../ssl/key.pem');
+    const certPath = path.join(__dirname, '../ssl/cert.pem');
+
+    // Check if SSL key file exists
+    if (!fs.existsSync(keyPath)) {
+        log.error('SSL key file not found.');
+        process.exit(1); // Exit the application if the key file is missing
+    }
+
+    // Check if SSL certificate file exists
+    if (!fs.existsSync(certPath)) {
+        log.error('SSL certificate file not found.');
+        process.exit(1); // Exit the application if the certificate file is missing
+    }
+
+    // Read SSL key and certificate files securely
     const options = {
-        key: fs.readFileSync(path.join(__dirname, '../ssl/key.pem'), 'utf-8'),
-        cert: fs.readFileSync(path.join(__dirname, '../ssl/cert.pem'), 'utf-8'),
+        key: fs.readFileSync(keyPath, 'utf-8'),
+        cert: fs.readFileSync(certPath, 'utf-8'),
     };
+
+    // Create HTTPS server using self-signed certificates
     server = https.createServer(options, app);
 } else {
     server = http.createServer(app);
@@ -154,6 +176,8 @@ const { v4: uuidV4 } = require('uuid');
 const apiBasePath = '/api/v1'; // api endpoint path
 const api_docs = host + apiBasePath + '/docs'; // api docs
 const api_key_secret = process.env.API_KEY_SECRET || 'mirotalkp2p_default_secret';
+const apiDisabledString = process.env.API_DISABLED || '["token", "meetings"]';
+const api_disabled = JSON.parse(apiDisabledString);
 
 // Ngrok config
 const ngrok = require('ngrok');
@@ -342,22 +366,16 @@ app.use((err, req, res, next) => {
 // main page
 app.get(['/'], (req, res) => {
     if (hostCfg.protected) {
-        hostCfg.authenticated = false;
-        res.sendFile(views.login);
+        const ip = getIP(req);
+        if (allowedIP(ip)) {
+            res.sendFile(views.landing);
+        } else {
+            hostCfg.authenticated = false;
+            res.sendFile(views.login);
+        }
     } else {
         res.sendFile(views.landing);
     }
-});
-
-// Get stats endpoint
-app.get(['/stats'], (req, res) => {
-    //log.debug('Send stats', statsData);
-    res.send(statsData);
-});
-
-// mirotalk about
-app.get(['/about'], (req, res) => {
-    res.sendFile(views.about);
 });
 
 // set new room name and join
@@ -373,6 +391,17 @@ app.get(['/newcall'], (req, res) => {
     } else {
         res.sendFile(views.newCall);
     }
+});
+
+// Get stats endpoint
+app.get(['/stats'], (req, res) => {
+    //log.debug('Send stats', statsData);
+    res.send(statsData);
+});
+
+// mirotalk about
+app.get(['/about'], (req, res) => {
+    res.sendFile(views.about);
 });
 
 // privacy policy
@@ -406,7 +435,7 @@ app.get('/join/', (req, res) => {
 
         if (token) {
             try {
-                const { username, password, presenter } = checkXSS(jwt.verify(token, jwtCfg.JWT_KEY));
+                const { username, password, presenter } = checkXSS(decodeToken(token));
                 // Peer credentials
                 peerUsername = username;
                 peerPassword = password;
@@ -425,7 +454,7 @@ app.get('/join/', (req, res) => {
         if (hostCfg.protected && isPeerValid && isPeerPresenter && !hostCfg.authenticated) {
             const ip = getIP(req);
             hostCfg.authenticated = true;
-            authHost = new Host(ip, true);
+            authHost.setAuthorizedIP(ip, true);
             log.debug('Direct Join user auth as host done', {
                 ip: ip,
                 username: peerUsername,
@@ -497,11 +526,13 @@ app.post(['/login'], (req, res) => {
     if (hostCfg.protected && isPeerValid && !hostCfg.authenticated) {
         const ip = getIP(req);
         hostCfg.authenticated = true;
-        authHost = new Host(ip, true);
-        log.debug('HOST LOGIN OK', { ip: ip, authorized: authHost.isAuthorized(ip) });
-        const token = jwt.sign({ username: username, password: password, presenter: true }, jwtCfg.JWT_KEY, {
-            expiresIn: jwtCfg.JWT_EXP,
+        authHost.setAuthorizedIP(ip, true);
+        log.debug('HOST LOGIN OK', {
+            ip: ip,
+            authorized: authHost.isAuthorizedIP(ip),
+            authorizedIps: authHost.getAuthorizedIPs(),
         });
+        const token = encodeToken({ username: username, password: password, presenter: true });
         return res.status(200).json({ message: token });
     }
 
@@ -509,9 +540,7 @@ app.post(['/login'], (req, res) => {
     if (isPeerValid) {
         log.debug('PEER LOGIN OK', { ip: ip, authorized: true });
         const isPresenter = roomPresenters && roomPresenters.includes(username).toString();
-        const token = jwt.sign({ username: username, password: password, presenter: isPresenter }, jwtCfg.JWT_KEY, {
-            expiresIn: jwtCfg.JWT_EXP,
-        });
+        const token = encodeToken({ username: username, password: password, presenter: isPresenter });
         return res.status(200).json({ message: token });
     } else {
         return res.status(401).json({ message: 'unauthorized' });
@@ -523,8 +552,72 @@ app.post(['/login'], (req, res) => {
     For api docs we use: https://swagger.io/
 */
 
+// request token endpoint
+app.post([`${apiBasePath}/token`], (req, res) => {
+    // Check if endpoint allowed
+    if (api_disabled.includes('token')) {
+        return res.status(403).json({
+            error: 'This endpoint has been disabled. Please contact the administrator for further information.',
+        });
+    }
+    // check if user was authorized for the api call
+    const { host, authorization } = req.headers;
+    const api = new ServerApi(host, authorization, api_key_secret);
+    if (!api.isAuthorized()) {
+        log.debug('MiroTalk get token - Unauthorized', {
+            header: req.headers,
+            body: req.body,
+        });
+        return res.status(403).json({ error: 'Unauthorized!' });
+    }
+    // Get Token
+    const token = api.getToken(req.body);
+    res.json({ token: token });
+    // log.debug the output if all done
+    log.debug('MiroTalk get token - Authorized', {
+        header: req.headers,
+        body: req.body,
+        token: token,
+    });
+});
+
+// request meetings list
+app.get([`${apiBasePath}/meetings`], (req, res) => {
+    // Check if endpoint allowed
+    if (api_disabled.includes('meetings')) {
+        return res.status(403).json({
+            error: 'This endpoint has been disabled. Please contact the administrator for further information.',
+        });
+    }
+    // check if user was authorized for the api call
+    const { host, authorization } = req.headers;
+    const api = new ServerApi(host, authorization, api_key_secret);
+    if (!api.isAuthorized()) {
+        log.debug('MiroTalk get meetings - Unauthorized', {
+            header: req.headers,
+            body: req.body,
+        });
+        return res.status(403).json({ error: 'Unauthorized!' });
+    }
+    // Get meetings
+    const meetings = api.getMeetings(peers);
+    res.json({ meetings: meetings });
+    // log.debug the output if all done
+    log.debug('MiroTalk get meetings - Authorized', {
+        header: req.headers,
+        body: req.body,
+        meetings: meetings,
+    });
+});
+
 // API request meeting room endpoint
 app.post([`${apiBasePath}/meeting`], (req, res) => {
+    // Check if endpoint allowed
+    if (api_disabled.includes('meeting')) {
+        return res.status(403).json({
+            error: 'This endpoint has been disabled. Please contact the administrator for further information.',
+        });
+    }
     const { host, authorization } = req.headers;
     const api = new ServerApi(host, authorization, api_key_secret);
     if (!api.isAuthorized()) {
@@ -545,6 +638,12 @@ app.post([`${apiBasePath}/meeting`], (req, res) => {
 
 // API request join room endpoint
 app.post([`${apiBasePath}/join`], (req, res) => {
+    // Check if endpoint allowed
+    if (api_disabled.includes('join')) {
+        return res.status(403).json({
+            error: 'This endpoint has been disabled. Please contact the administrator for further information.',
+        });
+    }
     const { host, authorization } = req.headers;
     const api = new ServerApi(host, authorization, api_key_secret);
     if (!api.isAuthorized()) {
@@ -571,6 +670,11 @@ app.post([`${apiBasePath}/join`], (req, res) => {
 //Slack request meeting room endpoint
 app.post('/slack', (req, res) => {
     if (!slackEnabled) return res.end('`Under maintenance` - Please check back soon.');
+
+    // Check if endpoint allowed
+    if (api_disabled.includes('slack')) {
+        return res.end('`This endpoint has been disabled`. Please contact the administrator for further information.');
+    }
 
     log.debug('Slack', req.headers);
 
@@ -631,9 +735,9 @@ function getServerConfig(tunnel = false) {
             ngrok_enabled: ngrokEnabled,
             ngrok_token: ngrokEnabled ? ngrokAuthToken : '',
         },
-        server: host,
         cors: corsOptions,
         server_tunnel: tunnel,
+        server: host,
         test_ice_servers: testStunTurn,
         api_docs: api_docs,
         api_key_secret: api_key_secret,
@@ -845,6 +949,7 @@ io.sockets.on('connect', async (socket) => {
             peer_hand_status,
             peer_rec_status,
             peer_privacy_status,
+            peer_info,
         } = config;
 
         if (channel in socket.channels) {
@@ -866,7 +971,7 @@ io.sockets.on('connect', async (socket) => {
             // Check JWT
             if (peer_token) {
                 try {
-                    const { username, password, presenter } = checkXSS(jwt.verify(peer_token, jwtCfg.JWT_KEY));
+                    const { username, password, presenter } = checkXSS(decodeToken(peer_token));
 
                     const isPeerValid = isAuthPeer(username, password);
 
@@ -923,6 +1028,9 @@ io.sockets.on('connect', async (socket) => {
         // Check if peer is presenter, if token check the presenter key
         const isPresenter = peer_token ? is_presenter : await isPeerPresenter(channel, socket.id, peer_name, peer_uuid);
 
+        // Some peer info data
+        const { osName, osVersion, browserName, browserVersion } = peer_info;
+
         // collect peers info grp by channels
         peers[channel][socket.id] = {
             peer_name: peer_name,
@@ -935,6 +1043,8 @@ io.sockets.on('connect', async (socket) => {
             peer_hand_status: peer_hand_status,
             peer_rec_status: peer_rec_status,
             peer_privacy_status: peer_privacy_status,
+            os: osName ? `${osName} ${osVersion}` : '',
+            browser: browserName ? `${browserName} ${browserVersion}` : '',
         };
 
         const activeRooms = getActiveRooms();
@@ -1518,6 +1628,58 @@ function isAuthPeer(username, password) {
 }
 
 /**
+ * Encode JWT token payload
+ * @param {object} token
+ * @returns
+ */
+function encodeToken(token) {
+    if (!token) return '';
+
+    const { username = 'username', password = 'password', presenter = false, expire } = token;
+
+    const expireValue = expire || jwtCfg.JWT_EXP;
+
+    // Constructing payload
+    const payload = {
+        username: String(username),
+        password: String(password),
+        presenter: String(presenter),
+    };
+
+    // Encrypt payload using AES encryption
+    const payloadString = JSON.stringify(payload);
+    const encryptedPayload = CryptoJS.AES.encrypt(payloadString, jwtCfg.JWT_KEY).toString();
+
+    // Constructing JWT token
+    const jwtToken = jwt.sign({ data: encryptedPayload }, jwtCfg.JWT_KEY, { expiresIn: expireValue });
+
+    return jwtToken;
+}
+
+/**
+ * Decode JWT Payload data
+ * @param {object} jwtToken
+ * @returns mixed
+ */
+function decodeToken(jwtToken) {
+    if (!jwtToken) return null;
+
+    // Verify and decode the JWT token
+    const decodedToken = jwt.verify(jwtToken, jwtCfg.JWT_KEY);
+    if (!decodedToken || !decodedToken.data) {
+        throw new Error('Invalid token');
+    }
+
+    // Decrypt the payload using AES decryption
+    const decryptedPayload = CryptoJS.AES.decrypt(decodedToken.data, jwtCfg.JWT_KEY).toString(CryptoJS.enc.Utf8);
+
+    // Parse the decrypted payload as JSON
+    const payload = JSON.parse(decryptedPayload);
+
+    return payload;
+}
+
+/**
  * Get All connected peers count grouped by roomId
  * @return {object} array
  */
@@ -1552,7 +1714,10 @@ function getIP(req) {
  * @returns boolean
  */
 function allowedIP(ip) {
-    return authHost != null && authHost.isAuthorized(ip);
+    const authorizedIPs = authHost.getAuthorizedIPs();
+    const authorizedIP = authHost.isAuthorizedIP(ip);
+    log.info('Allowed IPs', { ip: ip, authorizedIP: authorizedIP, authorizedIPs: authorizedIPs });
+    return authHost != null && authorizedIP;
 }
 
 /**
@@ -1561,12 +1726,15 @@ function allowedIP(ip) {
  */
 function removeIP(socket) {
     if (hostCfg.protected) {
-        const ip = socket.handshake.address;
-        log.debug('Host protected check ip', { ip: ip });
+        const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
+        log.debug('[removeIP] - Host protected check ip', { ip: ip });
         if (ip && allowedIP(ip)) {
             authHost.deleteIP(ip);
             hostCfg.authenticated = false;
-            log.debug('Remove IP from auth', { ip: ip });
+            log.info('[removeIP] - Remove IP from auth', {
+                ip: ip,
+                authorizedIps: authHost.getAuthorizedIPs(),
+            });
         }
     }
 }
