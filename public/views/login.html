@@ -47,7 +47,7 @@
 
         <!-- xss -->
 
-        <script src="https://rawgit.com/leizongmin/js-xss/master/dist/xss.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/xss/dist/xss.min.js"></script>
 
         <!-- axios -->
 
@@ -60,7 +60,16 @@
                     <div class="site-header-inner">
                         <div class="brand">
                             <div class="m-0">
-                                <a href="/"><img src="../images/logo.svg" alt="Neon" width="32" height="32" /></a>
+                                <a href="/">
+                                    <img src="../images/logo.svg" alt="MiroTalk P2P" width="32" height="32" />
+                                    <!-- <img
+                                        src="../images/mirotalk-mc.png"
+                                        alt="MiroTalk P2P"
+                                        width="96"
+                                        height="auto"
+                                        style="margin-top: 80px"
+                                    /> -->
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -153,13 +162,22 @@
                                                         .then(function (response) {
                                                             console.log(response);
 
+                                                            // Store in session
+                                                            const token = response.data.message;
+                                                            window.sessionStorage.peer_token = token;
+
                                                             if (room) {
                                                                 return (window.location.href =
                                                                     '/join/' + window.location.search);
+                                                                /*
+                                                                return (window.location.href =
+                                                                    '/join/?room=' + room + '&token=' + token); */
                                                             }
-
                                                             if (roomPath) {
                                                                 return (window.location.href = '/join/' + roomPath);
+                                                                /*
+                                                                return (window.location.href =
+                                                                    '/join/?room=' + roomPath + '&token=' + token); */
                                                             }
 
                                                             return (window.location.href = '/logged');
@@ -192,7 +210,7 @@
                 </section>
             </main>
 
-            <footer class="site-footer center-content-mobile">
+            <footer id="footer" class="site-footer center-content-mobile">
                 <div class="container">
                     <div class="site-footer-inner">
                         <div class="footer-top space-between text-xxs">
@@ -304,13 +322,14 @@
                                     </li>
                                 </ul>
                             </nav>
-                            <div class="footer-copyright">&copy; 2023 MiroTalk, all rights reserved</div>
+                            <div class="footer-copyright">&copy; 2024 MiroTalk, all rights reserved</div>
                         </div>
                     </div>
                 </div>
             </footer>
         </div>
 
+        <script defer src="../js/common.js"></script>
         <script defer src="../js/landing.js"></script>
         <script async defer src="https://buttons.github.io/buttons.js"></script>
     </body>

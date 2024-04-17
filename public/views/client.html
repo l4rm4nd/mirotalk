@@ -52,6 +52,15 @@
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
         <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/themes/airbnb.css" />
 
+        <!--  pickr  https://github.com/simonwep/pickr -->
+
+        <!-- 'classic' theme -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css" />
+        <!-- 'monolith' theme -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/monolith.min.css" />
+        <!-- 'nano' theme -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/nano.min.css" />
+
         <!-- JavaScripts -->
 
         <script async src="../js/umami.js"></script>
@@ -81,7 +90,7 @@ access to use this app.
 
         <div id="initUser" class="init-user hidden">
             <!-- <p>Please allow the camera & microphone access to use this app.</p> -->
-            <div class="container">
+            <div id="initVideoContainer" class="init-video-container">
                 <video
                     id="initVideo"
                     playsinline="true"
@@ -91,12 +100,19 @@ access to use this app.
                     style="object-fit: contain"
                 ></video>
             </div>
-            <button id="initVideoBtn" class="fas fa-video" onclick="handleVideo(event, true)"></button>
-            <button id="initAudioBtn" class="fas fa-microphone" onclick="handleAudio(event, true)"></button>
-            <button id="initScreenShareBtn" class="fas fa-desktop"></button>
-            <select id="initVideoSelect" class="form-select text-light bg-dark"></select>
-            <select id="initMicrophoneSelect" class="form-select text-light bg-dark"></select>
-            <select id="initSpeakerSelect" class="form-select text-light bg-dark"></select>
+            <div class="initComands">
+                <button id="initVideoBtn" class="fas fa-video" onclick="handleVideo(event, true)"></button>
+                <button id="initAudioBtn" class="fas fa-microphone" onclick="handleAudio(event, true)"></button>
+                <button id="initScreenShareBtn" class="fas fa-desktop"></button>
+                <button
+                    id="initVideoMirrorBtn"
+                    class="fas fa-arrow-right-arrow-left"
+                    onclick="toggleInitVideoMirror()"
+                ></button>
+                <select id="initVideoSelect" class="form-select text-light bg-dark"></select>
+                <select id="initMicrophoneSelect" class="form-select text-light bg-dark"></select>
+                <select id="initSpeakerSelect" class="form-select text-light bg-dark"></select>
+            </div>
         </div>
 
         <!-- Start buttons bar https://fontawesome.com/icons?d=gallery -->
@@ -104,8 +120,8 @@ access to use this app.
         <div id="buttonsBar" class="fadein">
             <button id="shareRoomBtn" class="fas fa-share-alt"></button>
             <button id="hideMeBtn" class="fas fa-user"></button>
-            <button id="videoBtn" class="fas fa-video"></button>
             <button id="swapCameraBtn" class="fas fa-camera-rotate"></button>
+            <button id="videoBtn" class="fas fa-video"></button>
             <button id="audioBtn" class="fas fa-microphone"></button>
             <button id="screenShareBtn" class="fas fa-desktop"></button>
             <button id="recordStreamBtn" class="fas fa-record-vinyl"></button>
@@ -290,6 +306,9 @@ access to use this app.
                     <button id="tabProfileBtn" class="fa-solid fa-user tablinks">
                         <p class="tabButtonText">Profile</p>
                     </button>
+                    <button id="tabNetworkBtn" class="fa-solid fa-network-wired">
+                        <p class="tabButtonText">Network</p>
+                    </button>
                     <button id="tabStylingBtn" class="fas fa-palette tablinks">
                         <p class="tabButtonText">Style</p>
                     </button>
@@ -313,15 +332,18 @@ access to use this app.
                                 </td>
                             </tr>
                         </table>
-                        <button id="roomSendEmailBtn">
-                            <i class="fas fa-envelope-circle-check"></i>&nbsp;Send email invitation
-                        </button>
-                        <br />
                         <div id="tabRoomSecurity">
                             <button id="lockRoomBtn"><i class="fas fa-lock-open"></i>&nbsp;Lock room</button>
                             <button id="unlockRoomBtn"><i class="fas fa-lock"></i>&nbsp;Unlock room</button>
                             <br />
                         </div>
+                        <div id="tabEmailInvitation">
+                            <button id="roomSendEmailBtn">
+                                <i class="fas fa-envelope-circle-check"></i>&nbsp;Send email invitation
+                                <br />
+                            </button>
+                        </div>
+                        <br />
                         <br />
                         <table id="mySettingsTable">
                             <tr>
@@ -610,8 +632,22 @@ access to use this app.
 
                     <div id="tabRecording" class="tabcontent">
                         <img id="recImage" src="../images/recording.png" />
+                        <div id="recOptions">
+                            <table class="settingsTable">
+                                <tr>
+                                    <td class="width-160">
+                                        <div class="title">
+                                            <i class="fa-solid fa-film"></i>
+                                            <p>Prioritize H.264</p>
+                                        </div>
+                                    </td>
+                                    <td><input class="toggle" id="switchH264Recording" type="checkbox" /></td>
+                                </tr>
+                            </table>
+                            <hr class="hr" />
+                        </div>
                         <div style="display: table-row">
-                            <span class="clw" id="recordingTime"></span>
+                            <span class="clw notranslate" id="recordingTime"></span>
                             <br />
                             <button id="pauseRecBtn" class="buttons" style="display: none">
                                 <i class="far fa-pause-circle"></i>
@@ -621,8 +657,8 @@ access to use this app.
                                 <i class="far fa-play-circle"></i>
                                 <p>Resume recording</p>
                             </button>
-                            <div class="clw" id="lastRecordingInfo"></div>
                         </div>
+                        <div class="clw" id="lastRecordingInfo"></div>
                     </div>
 
                     <div id="tabMedia" class="tabcontent">
@@ -674,6 +710,49 @@ access to use this app.
                         </div>
                     </div>
 
+                    <div id="tabNetwork" class="tabcontent">
+                        <br />
+                        <table id="mySettingsTable">
+                            <tr>
+                                <td class="width-130">
+                                    <div class="title">
+                                        <i class="fa-solid fa-location-dot"></i>
+                                        <p>IP</p>
+                                    </div>
+                                </td>
+                                <td><p id="networkIP"></p></td>
+                            </tr>
+                            <tr>
+                                <td class="width-130">
+                                    <div class="title">
+                                        <i class="fa-solid fa-house-signal"></i>
+                                        <p>Host</p>
+                                    </div>
+                                </td>
+                                <td><p id="networkHost">🔴</p></td>
+                            </tr>
+                            <tr>
+                                <td class="width-130">
+                                    <div class="title">
+                                        <i class="fa-solid fa-globe"></i>
+                                        <p>Stun</p>
+                                    </div>
+                                </td>
+                                <td><p id="networkStun">🔴</p></td>
+                            </tr>
+                            <tr id="shareOnJoinButton">
+                                <td class="width-130">
+                                    <div class="title">
+                                        <i class="fa-solid fa-tower-cell"></i>
+                                        <p>Turn</p>
+                                    </div>
+                                </td>
+                                <td><p id="networkTurn">🔴</p></td>
+                            </tr>
+                        </table>
+                        <!-- <hr class="hr" /> -->
+                    </div>
+
                     <div id="tabStyling" class="tabcontent">
                         <br />
                         <div class="title">
@@ -688,6 +767,23 @@ access to use this app.
                             <option value="blue">🔵 Blue</option>
                             <option value="red">🔴 Red</option>
                         </select>
+                        <br />
+                        <div class="title">
+                            <i class="fas fa-fill-drip"></i>
+                            <p>Custom theme</p>
+                        </div>
+                        <br />
+                        <input id="themeColorPicker" class="theme-color-picker" type="text" />
+                        <br />
+                        <div class="inline-check-box">
+                            <div class="width-130">
+                                <div class="title">
+                                    <i class="fas fa-save"></i>
+                                    <p>Keep custom</p>
+                                </div>
+                            </div>
+                            <input id="keepCustomTheme" class="toggle" type="checkbox" />
+                        </div>
                         <br />
                         <div class="title">
                             <i class="fa-solid fa-up-down-left-right"></i>
@@ -863,11 +959,14 @@ access to use this app.
         - https://www.npmjs.com/package/qrious                              (https://github.com/neocotic/qrious)
         - https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js    (https://github.com/missive/emoji-mart)
         - https://mozilla.github.io/pdf.js/                                 (https://github.com/mozilla/pdf.js)
+        - https://www.jsdelivr.com/package/npm/crypto-js                    (https://github.com/brix/crypto-js/)
         - https://www.npmjs.com/package/tippy.js                            (https://github.com/atomiks/tippyjs) 
         - https://flatpickr.js.org/                                         (https://github.com/flatpickr/flatpickr)
+        - https://simonwep.github.io/pickr/                                 (https://github.com/simonwep/pickr)
+
         -->
         <script defer src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-        <script defer src="https://rawgit.com/leizongmin/js-xss/master/dist/xss.js"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/xss/dist/xss.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/detectrtc@1.4.1/DetectRTC.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/sweetalert2@11.4.8"></script>
@@ -875,9 +974,13 @@ access to use this app.
         <script defer src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+        <script defer src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+        <!-- <script defer src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/index.min.js"></script> -->
         <script defer src="https://unpkg.com/@popperjs/core@2"></script>
         <script defer src="https://unpkg.com/tippy.js@6"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.es5.min.js"></script>
         <script defer src="/socket.io/socket.io.js"></script>
         <script defer src="../js/localStorage.js"></script>
         <script defer src="../js/helpers.js"></script>

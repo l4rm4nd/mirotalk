@@ -4,19 +4,31 @@ const util = require('util');
 
 const colors = require('colors');
 
-colors.enable(); //colors.disable();
+const LOGS_DEBUG = process.env.LOGS_DEBUG ? process.env.LOGS_DEBUG === 'true' : true;
+const LOGS_COLORS = process.env.LOGS_COLORS ? process.env.LOGS_COLORS === 'true' : true;
+
+console.log('Logs', {
+    colors: LOGS_COLORS,
+    debug: LOGS_DEBUG,
+});
+
+LOGS_COLORS ? colors.enable() : colors.disable();
 
 const options = {
     depth: null,
-    colors: true,
+    colors: LOGS_COLORS,
 };
 module.exports = class Logs {
-    constructor(appName = 'miroTalkP2P', debugOn = true) {
+    constructor(appName = 'miroTalkP2P') {
         this.appName = colors.yellow(appName);
-        this.debugOn = debugOn;
+        this.debugOn = LOGS_DEBUG;
         this.timeStart = Date.now();
         this.timeEnd = null;
         this.timeElapsedMs = null;
+        this.tzOptions = {
+            timeZone: process.env.TZ || 'UTC', // Fallback to UTC if TZ environment variable is not set
+            hour12: false, // Set hour12 to false for 24-hour format
+        };
     }
 
     /**
@@ -30,7 +42,7 @@ module.exports = class Logs {
             this.timeEnd = Date.now();
             this.timeElapsedMs = this.getFormatTime(Math.floor(this.timeEnd - this.timeStart));
             console.debug(
-                '[' + this.getDataTime() + '] [' + this.appName + '] ' + msg,
+                '[' + this.getDateTime() + '] [' + this.appName + '] ' + msg,
                 util.inspect(op, options),
                 this.timeElapsedMs,
             );
@@ -45,7 +57,7 @@ module.exports = class Logs {
      * @returns
      */
     log(msg, op = '') {
-        console.log('[' + this.getDataTime() + '] [' + this.appName + '] ' + msg, util.inspect(op, options));
+        console.log('[' + this.getDateTime() + '] [' + this.appName + '] ' + msg, util.inspect(op, options));
     }
 
     /**
@@ -56,7 +68,7 @@ module.exports = class Logs {
      */
     info(msg, op = '') {
         console.info(
-            '[' + this.getDataTime() + '] [' + this.appName + '] ' + colors.green(msg),
+            '[' + this.getDateTime() + '] [' + this.appName + '] ' + colors.green(msg),
             util.inspect(op, options),
         );
     }
@@ -69,7 +81,7 @@ module.exports = class Logs {
      */
     warn(msg, op = '') {
         console.info(
-            '[' + this.getDataTime() + '] [' + this.appName + '] ' + colors.yellow(msg),
+            '[' + this.getDateTime() + '] [' + this.appName + '] ' + colors.yellow(msg),
             util.inspect(op, options),
         );
     }
@@ -82,17 +94,19 @@ module.exports = class Logs {
      */
     error(msg, op = '') {
         console.info(
-            '[' + this.getDataTime() + '] [' + this.appName + '] ' + colors.red(msg),
+            '[' + this.getDateTime() + '] [' + this.appName + '] ' + colors.red(msg),
             util.inspect(op, options),
         );
     }
 
     /**
      * Get date time
-     * @returns {string} date to ISO string
+     * @returns {string} date to Local String
      */
-    getDataTime() {
-        return colors.cyan(new Date().toISOString().replace(/T/, ' ').replace(/Z/, ''));
+    getDateTime() {
+        const currentTime = new Date().toLocaleString('en-US', this.tzOptions);
+        const milliseconds = String(new Date().getMilliseconds()).padStart(3, '0');
+        return colors.cyan(`${currentTime}:${milliseconds}`);
     }
 
     /**

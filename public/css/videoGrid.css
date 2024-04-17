@@ -41,6 +41,7 @@
     display: inline-block;
     background: var(--body-bg);
     border: var(--elem-border-color);
+    box-shadow: var(--box-shadow);
     border-radius: 10px;
     animation: show 0.4s ease;
 }
@@ -69,9 +70,36 @@
     color: #fff;
 }
 
+.navbar div {
+    display: inline;
+}
+
 .navbar button:hover {
     color: var(--hover-color);
     cursor: pointer;
+}
+
+/*--------------------------------------------------------------
+# Expand buttons 
+--------------------------------------------------------------*/
+
+.expand-video-content {
+    position: relative;
+    display: none;
+    float: right;
+    width: auto;
+}
+
+.expand-video-content button {
+    display: none;
+}
+
+.expand-video:hover .expand-video-content {
+    display: inline;
+}
+
+.expand-video:hover .expand-video-content button {
+    display: inline;
 }
 
 /*--------------------------------------------------------------
@@ -84,7 +112,7 @@
     right: 0;
     bottom: 0;
     color: #fff;
-    font-size: 14px;
+    font-size: 12px;
     display: flex;
     align-items: center;
     margin: 5px;
@@ -114,15 +142,6 @@
 /*--------------------------------------------------------------
 # Video 
 --------------------------------------------------------------*/
-
-.container {
-    position: relative;
-}
-.container video {
-    z-index: 0;
-    position: relative;
-    height: 240px;
-}
 
 .videoCircle {
     position: absolute;
